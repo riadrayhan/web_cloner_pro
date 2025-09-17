@@ -27,15 +27,22 @@ logging.getLogger('socketio').setLevel(logging.ERROR)
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'web_cloner_secret_key'
-socketio = SocketIO(app, cors_allowed_origins="*")
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'web_cloner_secret_key')
+
+# Configure SocketIO - Use "*" for CORS to allow Render domain
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='threading',  # Use threading for single worker compatibility without eventlet
+    engineio_logger=False
+)
 
 # Global variables for server management
 preview_servers = {}  # Store multiple preview servers
 current_preview_port = 9000
 
 class WebClonerCore:
-    """Core web cloning functionality - your existing logic with enhancements"""
+    """Core web cloning functionality"""
     
     def __init__(self, socketio_instance=None):
         self.socketio = socketio_instance
@@ -55,71 +62,42 @@ class WebClonerCore:
         print(f"Status: {message} ({progress}%)" if progress else f"Status: {message}")
     
     def clone_website(self, url, output_base_dir):
-        """Main cloning function - your existing logic"""
+        """Main cloning function"""
         try:
             self.emit_status("Starting website cloning...", 0)
-            
-            # Parse URL and create output directory
             parsed_url = urlparse(url)
             domain = parsed_url.netloc.replace(':', '_')
             output_dir = os.path.join(output_base_dir, domain)
-            
-            # Create output directory
             os.makedirs(output_dir, exist_ok=True)
-            
-            # Create assets directory
             assets_dir = os.path.join(output_dir, 'assets')
             os.makedirs(assets_dir, exist_ok=True)
-            
             self.emit_status(f"Downloading main page from {url}...", 10)
-            
-            # Download main page
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
-            
             self.emit_status("Parsing HTML content...", 20)
-            
-            # Parse HTML
             soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # Process and download resources
             self.emit_status("Processing images and resources...", 30)
-            
-            # Download images
             self.process_images(soup, url, assets_dir)
             self.emit_status("Images processed", 50)
-            
-            # Download CSS files
             self.emit_status("Processing CSS files...", 60)
             self.process_css_files(soup, url, assets_dir)
-            
-            # Download JavaScript files
             self.emit_status("Processing JavaScript files...", 70)
             self.process_js_files(soup, url, assets_dir)
-            
-            # Process internal links
             self.emit_status("Processing internal links...", 80)
             self.process_internal_links(soup, url, output_dir)
-            
-            # Save main HTML file
             self.emit_status("Saving HTML file...", 90)
             html_file = os.path.join(output_dir, 'index.html')
             with open(html_file, 'w', encoding='utf-8') as f:
                 f.write(str(soup))
-            
-            # Create ZIP file
             self.emit_status("Creating downloadable archive...", 95)
             zip_path = self.create_zip_archive(output_dir)
-            
             self.emit_status(f"Website cloned successfully!", 100)
-            
             return {
                 'success': True,
                 'output_dir': output_dir,
                 'zip_path': zip_path,
                 'domain': domain
             }
-            
         except Exception as e:
             self.emit_status(f"Error: {str(e)}", 0)
             return {
@@ -131,20 +109,17 @@ class WebClonerCore:
         """Create ZIP archive of cloned website"""
         zip_name = f"{os.path.basename(source_dir)}_cloned.zip"
         zip_path = os.path.join(os.path.dirname(source_dir), zip_name)
-        
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for root, dirs, files in os.walk(source_dir):
                 for file in files:
                     file_path = os.path.join(root, file)
                     arc_name = os.path.relpath(file_path, source_dir)
                     zipf.write(file_path, arc_name)
-        
         return zip_path
     
     def process_images(self, soup, base_url, assets_dir):
         """Download and process all images"""
         img_tags = soup.find_all(['img', 'source'])
-        
         for i, tag in enumerate(img_tags):
             try:
                 img_url = None
@@ -154,23 +129,19 @@ class WebClonerCore:
                     img_url = tag['data-src']
                 elif tag.get('data-lazy-src'):
                     img_url = tag['data-lazy-src']
-                
                 if img_url:
                     if tag.get('srcset'):
                         srcset_urls = self.parse_srcset(tag['srcset'])
                         for srcset_url in srcset_urls:
                             self.download_resource(srcset_url, base_url, assets_dir)
-                    
                     local_path = self.download_resource(img_url, base_url, assets_dir)
                     if local_path:
                         tag['src'] = local_path
                         for attr in ['data-src', 'data-lazy-src', 'loading']:
                             if tag.get(attr):
                                 del tag[attr]
-                
             except Exception as e:
                 print(f"Error processing image {i}: {e}")
-        
         self.process_css_background_images(soup, base_url, assets_dir)
     
     def parse_srcset(self, srcset):
@@ -192,7 +163,6 @@ class WebClonerCore:
                 local_path = self.download_resource(url, base_url, assets_dir)
                 if local_path:
                     tag['style'] = style.replace(url, local_path)
-        
         for style_tag in soup.find_all('style'):
             if style_tag.string:
                 css_content = style_tag.string
@@ -226,12 +196,10 @@ class WebClonerCore:
     def process_internal_links(self, soup, base_url, output_dir):
         """Process internal page links"""
         base_domain = urlparse(base_url).netloc
-        
         for link in soup.find_all('a', href=True):
             href = link['href']
             full_url = urljoin(base_url, href)
             link_domain = urlparse(full_url).netloc
-            
             if link_domain == base_domain:
                 try:
                     response = self.session.get(full_url, timeout=15)
@@ -245,17 +213,13 @@ class WebClonerCore:
                             if not filename.endswith('.html'):
                                 filename += '.html'
                             local_dir = os.path.join(output_dir, os.path.dirname(path).strip('/'))
-                        
                         if local_dir != output_dir:
                             os.makedirs(local_dir, exist_ok=True)
-                        
                         file_path = os.path.join(local_dir, filename)
                         with open(file_path, 'w', encoding='utf-8') as f:
                             f.write(response.text)
-                        
                         rel_path = os.path.relpath(file_path, output_dir).replace('\\', '/')
                         link['href'] = rel_path
-                        
                 except Exception as e:
                     print(f"Error downloading internal page {full_url}: {e}")
     
@@ -264,18 +228,13 @@ class WebClonerCore:
         try:
             if url.startswith('data:'):
                 return self.save_data_uri(url, assets_dir)
-            
             full_url = urljoin(base_url, url)
-            
             if full_url in self.downloaded_resources:
                 return self.get_local_path(full_url, assets_dir)
-            
             response = self.session.get(full_url, timeout=15)
             response.raise_for_status()
-            
             parsed_url = urlparse(full_url)
             filename = os.path.basename(parsed_url.path) or 'resource'
-            
             if '.' not in filename:
                 content_type = response.headers.get('content-type', '')
                 if 'image' in content_type:
@@ -285,21 +244,17 @@ class WebClonerCore:
                     filename += '.css'
                 elif 'javascript' in content_type:
                     filename += '.js'
-            
             counter = 1
             original_filename = filename
             while os.path.exists(os.path.join(assets_dir, filename)):
                 name, ext = os.path.splitext(original_filename)
                 filename = f"{name}_{counter}{ext}"
                 counter += 1
-            
             file_path = os.path.join(assets_dir, filename)
             with open(file_path, 'wb') as f:
                 f.write(response.content)
-            
             self.downloaded_resources.add(full_url)
             return f"assets/{filename}"
-            
         except Exception as e:
             print(f"Error downloading resource {url}: {e}")
             return None
@@ -309,17 +264,13 @@ class WebClonerCore:
         try:
             header, data = data_uri.split(',', 1)
             mime_type = header.split(';')[0].split(':')[1]
-            
             ext = mimetypes.guess_extension(mime_type) or '.bin'
             filename = f"data_uri_{len(self.downloaded_resources)}{ext}"
-            
             file_data = base64.b64decode(data)
             file_path = os.path.join(assets_dir, filename)
             with open(file_path, 'wb') as f:
                 f.write(file_data)
-            
             return f"assets/{filename}"
-            
         except Exception as e:
             print(f"Error saving data URI: {e}")
             return None
@@ -329,7 +280,7 @@ class WebClonerCore:
         filename = os.path.basename(urlparse(url).path) or 'resource'
         return f"assets/{filename}"
 
-# Preview server management
+# Preview server management (only for local, disabled on Render)
 def find_available_port(start_port=9000):
     """Find an available port for preview server"""
     for port in range(start_port, start_port + 100):
@@ -342,50 +293,40 @@ def find_available_port(start_port=9000):
     return None
 
 def start_preview_server(folder_path, domain):
-    """Start preview server for a cloned website"""
+    """Start preview server for a cloned website - only local"""
+    if os.environ.get('RENDER'):
+        return None
     global preview_servers, current_preview_port
-    
-    # Stop existing server if running
     if domain in preview_servers:
         stop_preview_server(domain)
-    
-    # Find available port
     port = find_available_port(current_preview_port)
     if port is None:
         print(f"Error: No available port found for preview server (domain: {domain})")
         return None
-    
     current_preview_port = port + 1
-    
-    # Create custom handler
     class CustomHandler(http.server.SimpleHTTPRequestHandler):
         def end_headers(self):
             self.send_header('Cache-Control', 'no-cache')
             self.send_header('Access-Control-Allow-Origin', '*')
             super().end_headers()
-        
         def do_GET(self):
             if self.path == '/' or self.path == '':
                 self.path = '/index.html'
             elif self.path.endswith('/'):
                 self.path += 'index.html'
-            
             if '.' not in os.path.basename(self.path):
                 if os.path.exists(os.path.join(folder_path, self.path.lstrip('/') + '.html')):
                     self.path += '.html'
                 elif os.path.exists(os.path.join(folder_path, self.path.lstrip('/') + '/index.html')):
                     self.path += '/index.html'
-            
             try:
                 print(f"Serving file: {self.path} for domain: {domain}")
                 return super().do_GET()
             except Exception as e:
                 print(f"Error serving file {self.path}: {e}")
                 self.send_error(404, f"File not found: {self.path}")
-        
         def log_message(self, format, *args):
             print(f"Preview server request for {domain}: {format % args}")
-    
     def run_server():
         original_dir = os.getcwd()
         try:
@@ -401,16 +342,10 @@ def start_preview_server(folder_path, domain):
             os.chdir(original_dir)
             if domain in preview_servers:
                 del preview_servers[domain]
-    
-    # Start server thread
     server_thread = Thread(target=run_server, daemon=True)
     server_thread.start()
     preview_servers[domain] = {'port': port, 'thread': server_thread}
-    
-    # Wait briefly to ensure server starts
     time.sleep(2)
-    
-    # Verify server is running
     try:
         response = requests.get(f"http://localhost:{port}/index.html", timeout=10)
         if response.status_code == 200:
@@ -456,13 +391,9 @@ def set_download_location():
     try:
         data = request.get_json()
         location = data.get('location', '')
-        
         if not location:
             return jsonify({'error': 'No location provided'}), 400
-        
-        # Create directory if it doesn't exist
         os.makedirs(location, exist_ok=True)
-        
         return jsonify({'success': True, 'location': location})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -474,19 +405,18 @@ def get_cloned_websites():
         downloads_dir = os.path.join(os.getcwd(), 'cloned_websites')
         if not os.path.exists(downloads_dir):
             return jsonify({'websites': []})
-        
         websites = []
         for item in os.listdir(downloads_dir):
             item_path = os.path.join(downloads_dir, item)
             if os.path.isdir(item_path):
                 index_path = os.path.join(item_path, 'index.html')
                 if os.path.exists(index_path):
+                    has_preview = item in preview_servers if not os.environ.get('RENDER') else False
                     websites.append({
                         'domain': item,
                         'path': item_path,
-                        'has_preview': item in preview_servers
+                        'has_preview': has_preview
                     })
-        
         return jsonify({'websites': websites})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -497,28 +427,29 @@ def preview_website(domain):
     try:
         downloads_dir = os.path.join(os.getcwd(), 'cloned_websites')
         website_path = os.path.join(downloads_dir, domain)
-        
         if not os.path.exists(website_path):
             return jsonify({'error': 'Website not found'}), 404
-        
         index_path = os.path.join(website_path, 'index.html')
         if not os.path.exists(index_path):
             return jsonify({'error': 'No index.html found'}), 404
         
-        # Start preview server
-        if domain in preview_servers:
-            port = preview_servers[domain]['port']
+        if os.environ.get('RENDER'):
+            # On Render, use Flask-served preview URL
+            preview_url = f"/preview/{domain}"
         else:
-            port = start_preview_server(website_path, domain)
-            if port is None:
-                return jsonify({'error': 'Could not start preview server'}), 500
+            # Local: Use port-based server
+            if domain in preview_servers:
+                port = preview_servers[domain]['port']
+            else:
+                port = start_preview_server(website_path, domain)
+                if port is None:
+                    return jsonify({'error': 'Could not start preview server'}), 500
+            preview_url = f"http://localhost:{port}"
         
-        preview_url = f"http://localhost:{port}"
         return jsonify({
             'success': True,
             'preview_url': preview_url,
-            'domain': domain,
-            'port': port
+            'domain': domain
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -527,36 +458,51 @@ def preview_website(domain):
 def stop_preview(domain):
     """Stop preview for a cloned website"""
     try:
-        stop_preview_server(domain)
+        if not os.environ.get('RENDER'):
+            stop_preview_server(domain)
         return jsonify({'success': True, 'message': f'Preview stopped for {domain}'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/preview/<domain>/<path:path>')
+def serve_preview(domain, path):
+    """Serve preview files directly - for Render"""
+    try:
+        downloads_dir = os.path.join(os.getcwd(), 'cloned_websites')
+        website_path = os.path.join(downloads_dir, domain)
+        if not os.path.exists(website_path):
+            return send_from_directory(website_path, 'index.html', mimetype='text/html')
+        return send_from_directory(website_path, path or 'index.html')
+    except Exception as e:
+        return jsonify({'error': str(e)}), 404
+
 # SocketIO events
+@socketio.on('connect')
+def handle_connect():
+    print(f"Client connected: {request.sid}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print(f"Client disconnected: {request.sid}")
+
 @socketio.on('clone_website')
 def handle_clone_request(data):
     """Handle website cloning request"""
     def clone_task():
         url = data.get('url')
         download_location = data.get('downloadLocation', os.path.join(os.getcwd(), 'cloned_websites'))
-        
         if not url:
             emit('clone_error', {'error': 'No URL provided'})
             return
-        
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url
-        
-        # Create download directory
         try:
             os.makedirs(download_location, exist_ok=True)
         except Exception as e:
             emit('clone_error', {'error': f'Cannot create download directory: {str(e)}'})
             return
-        
         cloner = WebClonerCore(socketio)
         result = cloner.clone_website(url, download_location)
-        
         if result['success']:
             zip_filename = os.path.basename(result['zip_path'])
             emit('clone_complete', {
@@ -566,8 +512,6 @@ def handle_clone_request(data):
             })
         else:
             emit('clone_error', {'error': result['error']})
-    
-    # Run in separate thread
     thread = Thread(target=clone_task)
     thread.daemon = True
     thread.start()
@@ -578,7 +522,6 @@ def create_templates():
     templates_dir = 'templates'
     os.makedirs(templates_dir, exist_ok=True)
     
-    # Fixed HTML with proper button reset and enhanced preview, including SocketIO reconnection handling
     html_content = '''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1318,13 +1261,15 @@ def create_templates():
     </div>
 
     <script>
-        // SocketIO with enhanced reconnection handling
+        // SocketIO with enhanced reconnection handling - fallback to polling for Render
         const socket = io({
+            path: '/socket.io',
             reconnection: true,
-            reconnectionAttempts: 5,
+            reconnectionAttempts: 10,
             reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
-            randomizationFactor: 0.5
+            reconnectionDelayMax: 10000,
+            randomizationFactor: 0.5,
+            transports: ['polling', 'websocket'] // Polling first for Render compatibility
         });
 
         socket.on('connect_error', (error) => {
@@ -1350,11 +1295,11 @@ def create_templates():
         let disconnectTimeout;
         socket.on('disconnect', () => {
             console.log('Disconnected from server');
-            showStatus('Disconnected from server, attempting to reconnect...', 'warning');
+            showStatus('Disconnected from server, attempting to reconnect...', 'info');
             disconnectTimeout = setTimeout(() => {
                 showStatus('Server unavailable. Reloading page...', 'error');
                 setTimeout(() => location.reload(), 2000);
-            }, 10000); // Reload after 10 seconds of disconnection
+            }, 30000); // 30 seconds timeout
         });
 
         socket.on('connect', () => {
@@ -1383,6 +1328,10 @@ def create_templates():
             locationInput.value = defaultLocation;
             currentDownloadLocation = defaultLocation;
             console.log('Default download location set:', defaultLocation);
+            // Load cloned websites if section is visible
+            if (previewSection.style.display === 'block') {
+                loadClonedWebsites();
+            }
         });
         
         function chooseDownloadLocation() {
@@ -1504,7 +1453,7 @@ def create_templates():
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
             button.disabled = true;
             
-            showStatus(`Starting preview server for ${domain}...`, 'info');
+            showStatus(`Starting preview for ${domain}...`, 'info');
             console.log(`Attempting to preview website: ${domain}`);
             
             fetch(`/api/preview/${domain}`)
@@ -1748,13 +1697,6 @@ def create_templates():
                 progressText.textContent = 'Initializing...';
             }, 3000);
         });
-        
-        // Auto-load websites on page load if section is visible
-        window.addEventListener('load', () => {
-            if (previewSection.style.display === 'block') {
-                loadClonedWebsites();
-            }
-        });
 
         // Add URL validation
         urlInput.addEventListener('input', function() {
@@ -1821,6 +1763,8 @@ if __name__ == '__main__':
     print("📁 Default Download Location:", default_output)
     print()
     print("🔧 Keep this terminal open to run the server")
+    print("💡 For Render deployment: Create a Procfile with 'web: gunicorn --worker-class gevent --workers 1 app:app'")
+    print("   Install gunicorn and gevent: pip install gunicorn gevent")
     print("=" * 60)
     
     # Auto-open browser
@@ -1833,9 +1777,10 @@ if __name__ == '__main__':
     
     Thread(target=open_browser, daemon=True).start()
     
-    # Run Flask app
+    # Run Flask app - Bind to 0.0.0.0 for Render
     try:
-        socketio.run(app, host='localhost', port=5000, debug=False, allow_unsafe_werkzeug=True)
+        port = int(os.environ.get('PORT', 5000))
+        socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
     except KeyboardInterrupt:
         print("\n🛑 Server stopped by user")
     except Exception as e:

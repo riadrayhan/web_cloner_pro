@@ -737,13 +737,15 @@
     </div>
 
     <script>
-        // SocketIO with enhanced reconnection handling
+        // SocketIO with enhanced reconnection handling - fallback to polling for Render
         const socket = io({
+            path: '/socket.io',
             reconnection: true,
-            reconnectionAttempts: 5,
+            reconnectionAttempts: 10,
             reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
-            randomizationFactor: 0.5
+            reconnectionDelayMax: 10000,
+            randomizationFactor: 0.5,
+            transports: ['polling', 'websocket'] // Polling first for Render compatibility
         });
 
         socket.on('connect_error', (error) => {
@@ -769,11 +771,11 @@
         let disconnectTimeout;
         socket.on('disconnect', () => {
             console.log('Disconnected from server');
-            showStatus('Disconnected from server, attempting to reconnect...', 'warning');
+            showStatus('Disconnected from server, attempting to reconnect...', 'info');
             disconnectTimeout = setTimeout(() => {
                 showStatus('Server unavailable. Reloading page...', 'error');
                 setTimeout(() => location.reload(), 2000);
-            }, 10000); // Reload after 10 seconds of disconnection
+            }, 30000); // 30 seconds timeout
         });
 
         socket.on('connect', () => {
@@ -802,6 +804,10 @@
             locationInput.value = defaultLocation;
             currentDownloadLocation = defaultLocation;
             console.log('Default download location set:', defaultLocation);
+            // Load cloned websites if section is visible
+            if (previewSection.style.display === 'block') {
+                loadClonedWebsites();
+            }
         });
         
         function chooseDownloadLocation() {
@@ -923,7 +929,7 @@
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
             button.disabled = true;
             
-            showStatus(`Starting preview server for ${domain}...`, 'info');
+            showStatus(`Starting preview for ${domain}...`, 'info');
             console.log(`Attempting to preview website: ${domain}`);
             
             fetch(`/api/preview/${domain}`)
@@ -1166,13 +1172,6 @@
                 progressFill.style.width = '0%';
                 progressText.textContent = 'Initializing...';
             }, 3000);
-        });
-        
-        // Auto-load websites on page load if section is visible
-        window.addEventListener('load', () => {
-            if (previewSection.style.display === 'block') {
-                loadClonedWebsites();
-            }
         });
 
         // Add URL validation
