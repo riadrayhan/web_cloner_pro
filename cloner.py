@@ -135,7 +135,6 @@ class WebClonerCore:
         
         return zip_path
     
-    # Your existing methods (process_images, process_css_files, etc.)
     def process_images(self, soup, base_url, assets_dir):
         """Download and process all images"""
         img_tags = soup.find_all(['img', 'source'])
@@ -340,9 +339,14 @@ def start_preview_server(folder_path, domain):
     """Start preview server for a cloned website"""
     global preview_servers, current_preview_port
     
+    # Stop existing server if running
+    if domain in preview_servers:
+        stop_preview_server(domain)
+    
     # Find available port
     port = find_available_port(current_preview_port)
     if port is None:
+        print(f"Error: No available port found for preview server (domain: {domain})")
         return None
     
     current_preview_port = port + 1
@@ -351,6 +355,7 @@ def start_preview_server(folder_path, domain):
     class CustomHandler(http.server.SimpleHTTPRequestHandler):
         def end_headers(self):
             self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Access-Control-Allow-Origin', '*')
             super().end_headers()
         
         def do_GET(self):
@@ -360,24 +365,28 @@ def start_preview_server(folder_path, domain):
                 self.path += 'index.html'
             
             if '.' not in os.path.basename(self.path):
-                if os.path.exists(self.path.lstrip('/') + '.html'):
+                if os.path.exists(os.path.join(folder_path, self.path.lstrip('/') + '.html')):
                     self.path += '.html'
-                elif os.path.exists(self.path.lstrip('/') + '/index.html'):
+                elif os.path.exists(os.path.join(folder_path, self.path.lstrip('/') + '/index.html')):
                     self.path += '/index.html'
             
             try:
+                print(f"Serving file: {self.path} for domain: {domain}")
                 return super().do_GET()
-            except Exception:
-                self.send_error(404, "File not found")
+            except Exception as e:
+                print(f"Error serving file {self.path}: {e}")
+                self.send_error(404, f"File not found: {self.path}")
         
         def log_message(self, format, *args):
-            pass
+            print(f"Preview server request for {domain}: {format % args}")
     
     def run_server():
         original_dir = os.getcwd()
         try:
             os.chdir(folder_path)
+            print(f"Starting preview server for {domain} on port {port} at path {folder_path}")
             with socketserver.TCPServer(("localhost", port), CustomHandler) as httpd:
+                httpd.allow_reuse_address = True
                 preview_servers[domain] = {'httpd': httpd, 'port': port, 'thread': None}
                 httpd.serve_forever()
         except Exception as e:
@@ -392,7 +401,34 @@ def start_preview_server(folder_path, domain):
     server_thread.start()
     preview_servers[domain] = {'port': port, 'thread': server_thread}
     
-    return port
+    # Wait briefly to ensure server starts
+    time.sleep(2)
+    
+    # Verify server is running
+    try:
+        response = requests.get(f"http://localhost:{port}/index.html", timeout=10)
+        if response.status_code == 200:
+            print(f"Preview server for {domain} started successfully on port {port}")
+            return port
+        else:
+            print(f"Preview server for {domain} failed to serve index.html (status: {response.status_code})")
+            return None
+    except Exception as e:
+        print(f"Error verifying preview server for {domain}: {e}")
+        return None
+
+def stop_preview_server(domain):
+    """Stop preview server for a domain"""
+    if domain in preview_servers:
+        try:
+            server_info = preview_servers[domain]
+            if 'httpd' in server_info and server_info['httpd']:
+                server_info['httpd'].shutdown()
+                server_info['httpd'].server_close()
+            del preview_servers[domain]
+            print(f"Stopped preview server for {domain}")
+        except Exception as e:
+            print(f"Error stopping preview server for {domain}: {e}")
 
 # Flask routes
 @app.route('/')
@@ -481,6 +517,15 @@ def preview_website(domain):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/stop_preview/<domain>')
+def stop_preview(domain):
+    """Stop preview for a cloned website"""
+    try:
+        stop_preview_server(domain)
+        return jsonify({'success': True, 'message': f'Preview stopped for {domain}'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # SocketIO events
 @socketio.on('clone_website')
 def handle_clone_request(data):
@@ -527,7 +572,7 @@ def create_templates():
     templates_dir = 'templates'
     os.makedirs(templates_dir, exist_ok=True)
     
-    # Enhanced main template with modern, attractive UI design
+    # Fixed HTML with proper button reset and enhanced preview
     html_content = '''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -538,29 +583,21 @@ def create_templates():
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
-            --primary: #10b981;
-            --primary-dark: #059669;
-            --secondary: #d1fae5;
-            --accent: #34d399;
-            --success: #10b981;
-            --warning: #f59e0b;
+            --primary: #1e3a8a; /* Deep Indigo */
+            --primary-dark: #1e293b;
+            --secondary: #facc15; /* Gold Accent */
+            --secondary-dark: #ca8a04;
+            --background: #f8fafc;
+            --card-bg: rgba(255, 255, 255, 0.95);
+            --text-primary: #1e293b;
+            --text-secondary: #475569;
+            --success: #22c55e;
             --danger: #ef4444;
-            --dark: #064e3b;
-            --gray-100: #f0fdf4;
-            --gray-200: #dcfce7;
-            --gray-300: #bbf7d0;
-            --gray-600: #16a34a;
-            --gray-700: #15803d;
-            --gray-800: #166534;
-            --gray-900: #14532d;
-            --white: #ffffff;
-            --light-green: #ecfdf5;
-            --medium-green: #a7f3d0;
-            --shadow-sm: 0 1px 2px 0 rgb(16 185 129 / 0.1);
-            --shadow-md: 0 4px 6px -1px rgb(16 185 129 / 0.15), 0 2px 4px -2px rgb(16 185 129 / 0.1);
-            --shadow-lg: 0 10px 15px -3px rgb(16 185 129 / 0.15), 0 4px 6px -4px rgb(16 185 129 / 0.1);
-            --shadow-xl: 0 20px 25px -5px rgb(16 185 129 / 0.15), 0 8px 10px -6px rgb(16 185 129 / 0.1);
-            --ring-primary: 0 0 0 3px rgb(16 185 129 / 0.1);
+            --warning: #f59e0b;
+            --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
+            --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.15);
+            --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.2);
+            --ring: 0 0 0 3px rgba(30, 58, 138, 0.2);
         }
 
         * {
@@ -568,15 +605,15 @@ def create_templates():
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, var(--light-green) 0%, var(--secondary) 30%, var(--medium-green) 70%, var(--accent) 100%);
+            background: var(--background);
             min-height: 100vh;
-            padding: 20px;
+            padding: 40px;
             font-size: 16px;
             line-height: 1.6;
-            color: var(--gray-800);
+            color: var(--text-primary);
             position: relative;
             overflow-x: hidden;
         }
@@ -588,91 +625,65 @@ def create_templates():
             left: 0;
             right: 0;
             bottom: 0;
-            background: 
-                radial-gradient(circle at 20% 50%, rgba(16, 185, 129, 0.1) 0%, transparent 50%),
-                radial-gradient(circle at 80% 20%, rgba(52, 211, 153, 0.15) 0%, transparent 50%),
-                radial-gradient(circle at 40% 80%, rgba(167, 243, 208, 0.2) 0%, transparent 50%);
-            pointer-events: none;
-            z-index: 0;
+            background: linear-gradient(135deg, rgba(30, 58, 138, 0.05) 0%, rgba(250, 204, 21, 0.05) 100%);
+            z-index: -1;
         }
-        
+
         .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: var(--shadow-lg);
             position: relative;
             z-index: 1;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            padding: 50px;
-            border-radius: 24px;
-            box-shadow: var(--shadow-xl);
-            max-width: 900px;
-            margin: 0 auto;
-            transform: translateY(0);
-            transition: all 0.3s ease;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
 
         .container:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
         }
-        
+
         .header {
             text-align: center;
             margin-bottom: 40px;
         }
-        
+
         .title {
-            font-size: 3.5rem;
-            font-weight: 800;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 50%, var(--primary-dark) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin-bottom: 16px;
-            letter-spacing: -0.02em;
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            letter-spacing: -0.025em;
+            margin-bottom: 12px;
         }
 
         .subtitle {
-            font-size: 1.25rem;
-            color: var(--gray-700);
-            font-weight: 500;
-            margin-bottom: 32px;
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            font-weight: 400;
         }
 
         .logo {
-            font-size: 4rem;
+            font-size: 3rem;
+            color: var(--primary);
             margin-bottom: 16px;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        
-        .info-card {
-            background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(52, 211, 153, 0.12) 100%);
-            border: 1px solid rgba(16, 185, 129, 0.2);
-            padding: 24px;
-            border-radius: 16px;
-            margin-bottom: 32px;
-            position: relative;
-            overflow: hidden;
         }
 
-        .info-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, var(--primary) 0%, var(--accent) 100%);
+        .info-card {
+            background: rgba(30, 58, 138, 0.05);
+            border: 1px solid rgba(30, 58, 138, 0.1);
+            padding: 24px;
+            border-radius: 12px;
+            margin-bottom: 32px;
         }
 
         .info-title {
-            font-weight: 700;
-            color: var(--gray-800);
-            margin-bottom: 12px;
-            font-size: 1.1rem;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 16px;
             display: flex;
             align-items: center;
             gap: 8px;
@@ -680,13 +691,14 @@ def create_templates():
 
         .info-steps {
             list-style: none;
-            color: var(--gray-700);
+            color: var(--text-secondary);
         }
 
         .info-steps li {
-            margin: 8px 0;
-            padding-left: 24px;
+            margin: 12px 0;
+            padding-left: 28px;
             position: relative;
+            font-size: 0.95rem;
         }
 
         .info-steps li::before {
@@ -694,8 +706,8 @@ def create_templates():
             counter-increment: step-counter;
             position: absolute;
             left: 0;
-            top: 0;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            top: 2px;
+            background: var(--primary);
             color: white;
             width: 20px;
             height: 20px;
@@ -703,7 +715,7 @@ def create_templates():
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 0.75rem;
+            font-size: 0.8rem;
             font-weight: 600;
         }
 
@@ -714,129 +726,108 @@ def create_templates():
         .form-section {
             margin-bottom: 32px;
         }
-        
+
         .input-group {
             margin-bottom: 24px;
         }
-        
+
         .label {
             display: flex;
             align-items: center;
             gap: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            color: var(--text-primary);
             margin-bottom: 8px;
-            color: var(--gray-700);
-            font-weight: 600;
-            font-size: 1rem;
         }
 
         .label i {
             color: var(--primary);
         }
-        
+
         .input {
             width: 100%;
-            padding: 16px 20px;
-            border: 2px solid var(--gray-200);
-            border-radius: 12px;
-            font-size: 1rem;
-            transition: all 0.3s ease;
-            background: var(--white);
-            font-family: inherit;
+            padding: 12px 16px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+            background: white;
         }
-        
+
         .input:focus {
             outline: none;
             border-color: var(--primary);
-            box-shadow: var(--ring-primary);
-            transform: translateY(-1px);
+            box-shadow: var(--ring);
         }
 
         .input:hover {
-            border-color: var(--gray-300);
+            border-color: var(--primary-dark);
         }
-        
+
         .button {
-            padding: 16px 32px;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            padding: 12px 24px;
+            background: var(--primary);
             color: white;
             border: none;
-            border-radius: 12px;
-            font-size: 1rem;
-            font-weight: 600;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
             cursor: pointer;
-            transition: all 0.3s ease;
-            margin-right: 12px;
-            margin-bottom: 12px;
+            transition: background 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            text-decoration: none;
-            position: relative;
-            overflow: hidden;
         }
 
-        .button::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-            transition: left 0.5s ease;
-        }
-
-        .button:hover::before {
-            left: 100%;
-        }
-        
-        .button:hover {
+        .button:hover:not(:disabled) {
+            background: var(--primary-dark);
             transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(16, 185, 129, 0.3);
+            box-shadow: var(--shadow-md);
         }
-        
+
         .button:disabled {
-            background: var(--gray-300);
+            background: #94a3b8;
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
-            opacity: 0.6;
         }
 
-        .button:disabled::before {
-            display: none;
-        }
-        
         .button.secondary {
-            background: linear-gradient(135deg, var(--warning) 0%, #f97316 100%);
+            background: var(--secondary);
+            color: var(--primary-dark);
         }
-        
+
+        .button.secondary:hover:not(:disabled) {
+            background: var(--secondary-dark);
+        }
+
         .button.success {
-            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+            background: var(--success);
         }
-        
+
         .button.danger {
-            background: linear-gradient(135deg, var(--danger) 0%, #dc2626 100%);
+            background: var(--danger);
         }
 
         .button.ghost {
-            background: rgba(255, 255, 255, 0.1);
-            border: 2px solid var(--primary);
+            background: transparent;
+            border: 1px solid var(--primary);
             color: var(--primary);
         }
 
-        .button.ghost:hover {
+        .button.ghost:hover:not(:disabled) {
             background: var(--primary);
             color: white;
         }
-        
+
         .button-group {
             display: flex;
             flex-wrap: wrap;
             gap: 12px;
             margin-bottom: 24px;
         }
-        
+
         .location-selector {
             display: flex;
             gap: 12px;
@@ -849,192 +840,154 @@ def create_templates():
 
         .location-selector .button {
             margin: 0;
-            height: auto;
-            display: flex;
-            align-items: center;
         }
-        
+
         .progress-container {
             margin-bottom: 24px;
             display: none;
         }
 
         .progress-wrapper {
-            background: var(--gray-100);
-            border-radius: 10px;
-            padding: 4px;
-            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-        
-        .progress-bar {
-            width: 100%;
-            height: 12px;
-            background: var(--gray-200);
+            background: rgba(0, 0, 0, 0.05);
             border-radius: 8px;
-            overflow: hidden;
-            position: relative;
+            padding: 4px;
         }
-        
+
+        .progress-bar {
+            height: 10px;
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
         .progress-fill {
             height: 100%;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            background: var(--primary);
             transition: width 0.3s ease;
             width: 0%;
-            position: relative;
-            border-radius: 8px;
-        }
-
-        .progress-fill::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-            animation: shimmer 2s infinite;
-        }
-
-        @keyframes shimmer {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
         }
 
         .progress-text {
             text-align: center;
             margin-top: 8px;
             font-size: 0.9rem;
-            font-weight: 500;
-            color: var(--gray-600);
+            color: var(--text-secondary);
         }
-        
+
         .status {
             margin-top: 16px;
-            padding: 20px;
-            border-radius: 12px;
-            background: rgba(16, 185, 129, 0.1);
-            color: var(--gray-800);
+            padding: 16px;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.05);
+            color: var(--text-primary);
             text-align: center;
             display: none;
-            border: 1px solid rgba(16, 185, 129, 0.2);
-            font-weight: 500;
+            font-size: 0.95rem;
         }
-        
+
         .status.success {
-            background: rgba(16, 185, 129, 0.1);
+            background: rgba(34, 197, 94, 0.1);
             color: var(--success);
-            border-color: rgba(16, 185, 129, 0.2);
         }
-        
+
         .status.error {
             background: rgba(239, 68, 68, 0.1);
             color: var(--danger);
-            border-color: rgba(239, 68, 68, 0.2);
         }
 
         .status.info {
             background: rgba(59, 130, 246, 0.1);
             color: #3b82f6;
-            border-color: rgba(59, 130, 246, 0.2);
         }
-        
+
         .download-actions {
             margin-top: 24px;
-            text-align: center;
             display: flex;
             flex-wrap: wrap;
             gap: 12px;
             justify-content: center;
         }
-        
+
         .download-link {
+            padding: 12px 24px;
+            background: var(--success);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.3s ease;
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            padding: 14px 28px;
-            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
-            color: white;
-            text-decoration: none;
-            border-radius: 10px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            font-size: 0.95rem;
         }
-        
+
         .download-link:hover {
+            background: #16a34a;
             transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
-        }
-        
-        .preview-section {
-            margin-top: 40px;
-            padding: 32px;
-            background: rgba(255, 255, 255, 0.6);
-            backdrop-filter: blur(10px);
-            border-radius: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            display: none;
             box-shadow: var(--shadow-md);
         }
-        
+
+        .preview-section {
+            margin-top: 32px;
+            padding: 24px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 12px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            display: none;
+        }
+
         .section-title {
             font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--gray-800);
-            margin-bottom: 24px;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 20px;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 8px;
         }
 
         .section-title i {
             color: var(--primary);
         }
-        
+
         .websites-list {
-            margin-top: 20px;
+            margin-top: 16px;
         }
-        
+
         .website-item {
-            background: rgba(255, 255, 255, 0.9);
-            border: 1px solid var(--gray-200);
-            padding: 24px;
-            margin: 16px 0;
-            border-radius: 12px;
+            background: white;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin: 12px 0;
+            border-radius: 8px;
             display: flex;
             justify-content: space-between;
             align-items: center;
             transition: all 0.3s ease;
-            box-shadow: var(--shadow-sm);
         }
 
         .website-item:hover {
-            transform: translateY(-1px);
+            transform: translateY(-2px);
             box-shadow: var(--shadow-md);
-            border-color: var(--primary);
         }
-        
+
         .website-info {
             flex: 1;
         }
-        
+
         .website-domain {
-            font-weight: 700;
-            font-size: 1.2rem;
-            color: var(--gray-800);
+            font-weight: 600;
+            font-size: 1.1rem;
+            color: var(--primary);
             margin-bottom: 4px;
             display: flex;
             align-items: center;
             gap: 8px;
         }
 
-        .website-domain i {
-            color: var(--primary);
-        }
-
         .website-status {
             font-size: 0.9rem;
-            color: var(--gray-600);
+            color: var(--text-secondary);
             display: flex;
             align-items: center;
             gap: 6px;
@@ -1049,47 +1002,45 @@ def create_templates():
 
         .status-indicator.online {
             background: var(--success);
-            box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.3);
         }
 
         .status-indicator.offline {
-            background: var(--gray-400);
+            background: #94a3b8;
         }
-        
+
         .website-actions {
             display: flex;
             gap: 8px;
         }
-        
+
         .small-button {
-            padding: 10px 16px;
+            padding: 8px 16px;
             font-size: 0.9rem;
-            margin: 0;
         }
-        
+
         .empty-state {
             text-align: center;
-            padding: 60px 20px;
-            color: var(--gray-600);
+            padding: 40px 20px;
+            color: var(--text-secondary);
         }
 
         .empty-state i {
-            font-size: 4rem;
-            color: var(--gray-400);
-            margin-bottom: 16px;
+            font-size: 3rem;
+            color: #94a3b8;
+            margin-bottom: 12px;
             display: block;
         }
 
         .empty-state h3 {
-            font-size: 1.25rem;
+            font-size: 1.1rem;
             margin-bottom: 8px;
-            color: var(--gray-700);
         }
 
         .loading-spinner {
             display: inline-block;
-            width: 20px;
-            height: 20px;
+            width: 16px;
+            height: 16px;
             border: 2px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
             border-top-color: #fff;
@@ -1102,67 +1053,92 @@ def create_templates():
 
         .feature-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
             margin: 32px 0;
         }
 
         .feature-card {
-            background: rgba(255, 255, 255, 0.7);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 12px;
-            padding: 24px;
+            background: white;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            padding: 20px;
             text-align: center;
             transition: all 0.3s ease;
         }
 
         .feature-card:hover {
             transform: translateY(-4px);
-            box-shadow: var(--shadow-lg);
+            box-shadow: var(--shadow-md);
         }
 
         .feature-icon {
-            font-size: 2.5rem;
-            margin-bottom: 16px;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            font-size: 2rem;
+            color: var(--primary);
+            margin-bottom: 12px;
         }
 
         .feature-title {
             font-weight: 600;
-            color: var(--gray-800);
+            color: var(--primary);
             margin-bottom: 8px;
         }
 
         .feature-desc {
             font-size: 0.9rem;
-            color: var(--gray-600);
+            color: var(--text-secondary);
         }
-        
+
+        .preview-iframe {
+            width: 100%;
+            height: 600px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            margin-top: 16px;
+            background: white;
+        }
+
+        .preview-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .preview-url {
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            background: rgba(0, 0, 0, 0.05);
+            padding: 8px 12px;
+            border-radius: 4px;
+            flex: 1;
+            min-width: 200px;
+        }
+
         @media (max-width: 768px) {
-            .container {
-                padding: 32px 24px;
-                margin: 10px;
-            }
-            
-            .title {
-                font-size: 2.5rem;
+            body {
+                padding: 20px;
             }
 
-            .logo {
-                font-size: 3rem;
+            .container {
+                padding: 24px;
             }
-            
+
+            .title {
+                font-size: 2rem;
+            }
+
             .location-selector {
                 flex-direction: column;
             }
-            
+
             .button-group {
                 justify-content: center;
             }
-            
+
             .website-item {
                 flex-direction: column;
                 gap: 16px;
@@ -1180,19 +1156,24 @@ def create_templates():
             .feature-grid {
                 grid-template-columns: 1fr;
             }
+
+            .preview-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .preview-url {
+                text-align: center;
+            }
         }
 
         @media (max-width: 480px) {
-            body {
-                padding: 10px;
-            }
-
             .container {
-                padding: 24px 16px;
+                padding: 16px;
             }
 
             .title {
-                font-size: 2rem;
+                font-size: 1.75rem;
             }
 
             .button {
@@ -1205,22 +1186,21 @@ def create_templates():
             }
         }
 
-        /* Custom scrollbar */
         ::-webkit-scrollbar {
             width: 8px;
         }
 
         ::-webkit-scrollbar-track {
-            background: var(--gray-100);
+            background: rgba(0, 0, 0, 0.05);
         }
 
         ::-webkit-scrollbar-thumb {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            background: var(--primary);
             border-radius: 4px;
         }
 
         ::-webkit-scrollbar-thumb:hover {
-            background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
+            background: var(--primary-dark);
         }
     </style>
 </head>
@@ -1228,10 +1208,10 @@ def create_templates():
     <div class="container">
         <div class="header">
             <div class="logo">
-                <i class="fas fa-globe-americas"></i>
+                <i class="fas fa-globe"></i>
             </div>
             <h1 class="title">Web Cloner Pro</h1>
-            <p class="subtitle">Professional Website Downloader - Clone any website with all assets</p>
+            <p class="subtitle">Effortlessly clone websites with all assets</p>
         </div>
 
         <div class="feature-grid">
@@ -1239,25 +1219,25 @@ def create_templates():
                 <div class="feature-icon">
                     <i class="fas fa-download"></i>
                 </div>
-                <div class="feature-title">Complete Downloads</div>
-                <div class="feature-desc">Downloads HTML, CSS, JS, images, and all assets</div>
+                <div class="feature-title">Full Asset Downloads</div>
+                <div class="feature-desc">Capture HTML, CSS, JS, and images</div>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">
                     <i class="fas fa-eye"></i>
                 </div>
                 <div class="feature-title">Live Preview</div>
-                <div class="feature-desc">Preview cloned websites in your browser instantly</div>
+                <div class="feature-desc">View cloned sites instantly</div>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">
                     <i class="fas fa-archive"></i>
                 </div>
                 <div class="feature-title">ZIP Archives</div>
-                <div class="feature-desc">Get downloadable ZIP files of cloned websites</div>
+                <div class="feature-desc">Download sites as ZIP files</div>
             </div>
         </div>
-        
+
         <form id="cloneForm" class="form-section">
             <div class="input-group">
                 <label class="label" for="downloadLocation">
@@ -1269,7 +1249,7 @@ def create_templates():
                         type="text" 
                         id="downloadLocation" 
                         class="input" 
-                        placeholder="Choose folder to save cloned websites..."
+                        placeholder="Select a folder to save websites..."
                         readonly
                     >
                     <button type="button" class="button secondary" onclick="chooseDownloadLocation()">
@@ -1278,7 +1258,7 @@ def create_templates():
                     </button>
                 </div>
             </div>
-            
+
             <div class="input-group">
                 <label class="label" for="url">
                     <i class="fas fa-link"></i>
@@ -1292,19 +1272,19 @@ def create_templates():
                     required
                 >
             </div>
-            
+
             <div class="button-group">
                 <button type="submit" class="button" id="cloneBtn">
                     <i class="fas fa-rocket"></i>
                     Clone Website
                 </button>
-                <button type="button" class="button ghost" onclick="showPreviewSection()">
+                <button type="button" class="button ghost" onclick="togglePreviewSection()">
                     <i class="fas fa-list"></i>
-                    Show Cloned Websites
+                    View Cloned Websites
                 </button>
             </div>
         </form>
-        
+
         <div class="progress-container" id="progressContainer">
             <div class="progress-wrapper">
                 <div class="progress-bar">
@@ -1313,13 +1293,13 @@ def create_templates():
             </div>
             <div class="progress-text" id="progressText">Initializing...</div>
         </div>
-        
+
         <div class="status" id="status"></div>
-        
+
         <div class="preview-section" id="previewSection">
             <h3 class="section-title">
                 <i class="fas fa-server"></i>
-                Your Cloned Websites
+                Cloned Websites
             </h3>
             <div class="websites-list" id="websitesList">
                 <div class="empty-state">
@@ -1345,17 +1325,17 @@ def create_templates():
         const websitesList = document.getElementById('websitesList');
         
         let currentDownloadLocation = '';
+        let isCloning = false;
         
         // Initialize default download location
         window.addEventListener('load', () => {
             const defaultLocation = './cloned_websites';
             locationInput.value = defaultLocation;
             currentDownloadLocation = defaultLocation;
+            console.log('Default download location set:', defaultLocation);
         });
         
         function chooseDownloadLocation() {
-            // For web interface, we'll use a simple prompt
-            // In a real implementation, you might use a file picker API
             const location = prompt('Enter the full path where you want to save cloned websites:', currentDownloadLocation || './cloned_websites');
             if (location) {
                 fetch('/api/set_download_location', {
@@ -1371,17 +1351,20 @@ def create_templates():
                         locationInput.value = location;
                         currentDownloadLocation = location;
                         showStatus('Download location set successfully!', 'success');
+                        console.log('Download location updated:', location);
                     } else {
                         showStatus('Error setting download location: ' + data.error, 'error');
+                        console.error('Error setting download location:', data.error);
                     }
                 })
                 .catch(error => {
                     showStatus('Error: ' + error.message, 'error');
+                    console.error('Error in chooseDownloadLocation:', error);
                 });
             }
         }
         
-        function showPreviewSection() {
+        function togglePreviewSection() {
             const isVisible = previewSection.style.display === 'block';
             previewSection.style.display = isVisible ? 'none' : 'block';
             if (!isVisible) {
@@ -1401,6 +1384,7 @@ def create_templates():
             fetch('/api/get_cloned_websites')
                 .then(response => response.json())
                 .then(data => {
+                    console.log('Cloned websites data:', data);
                     if (data.websites && data.websites.length > 0) {
                         displayWebsites(data.websites);
                     } else {
@@ -1421,6 +1405,7 @@ def create_templates():
                             <p>${error.message}</p>
                         </div>
                     `;
+                    console.error('Error loading cloned websites:', error);
                 });
         }
         
@@ -1430,6 +1415,14 @@ def create_templates():
             websites.forEach(website => {
                 const websiteDiv = document.createElement('div');
                 websiteDiv.className = 'website-item';
+                
+                const previewButtonText = website.has_preview ? 'View Preview' : 'Start Preview';
+                const stopButtonHtml = website.has_preview ? `
+                    <button class="button danger small-button" onclick="stopPreview('${website.domain}')">
+                        <i class="fas fa-stop"></i>
+                        Stop
+                    </button>
+                ` : '';
                 
                 websiteDiv.innerHTML = `
                     <div class="website-info">
@@ -1445,8 +1438,9 @@ def create_templates():
                     <div class="website-actions">
                         <button class="button success small-button" onclick="previewWebsite('${website.domain}')">
                             <i class="fas fa-eye"></i>
-                            Preview
+                            ${previewButtonText}
                         </button>
+                        ${stopButtonHtml}
                     </div>
                 `;
                 
@@ -1455,26 +1449,93 @@ def create_templates():
         }
         
         function previewWebsite(domain) {
+            const button = event.target.closest('.button');
+            const originalContent = button.innerHTML;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
+            button.disabled = true;
+            
             showStatus(`Starting preview server for ${domain}...`, 'info');
+            console.log(`Attempting to preview website: ${domain}`);
             
             fetch(`/api/preview/${domain}`)
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
+                    console.log('Preview response:', data);
                     if (data.success) {
-                        // Open preview in new window/tab
-                        window.open(data.preview_url, '_blank');
-                        showStatus(`Preview started! Opening ${domain} at ${data.preview_url}`, 'success');
+                        const previewUrl = data.preview_url;
+                        console.log(`Opening preview URL: ${previewUrl}`);
                         
-                        // Refresh the websites list to update status
+                        // Try to open in new window
+                        const newWindow = window.open(previewUrl, '_blank', 'width=1200,height=800');
+                        if (newWindow) {
+                            showStatus(`Preview opened for ${domain} at ${previewUrl}`, 'success');
+                        } else {
+                            // Fallback: show URL to user
+                            showStatus(`Preview ready! Open manually: ${previewUrl}`, 'success');
+                            
+                            // Create a clickable link in the status
+                            setTimeout(() => {
+                                const statusEl = document.getElementById('status');
+                                statusEl.innerHTML = `
+                                    Preview ready for ${domain}!<br>
+                                    <a href="${previewUrl}" target="_blank" style="color: var(--primary); text-decoration: underline; font-weight: 600;">
+                                        Click here to open: ${previewUrl}
+                                    </a>
+                                `;
+                            }, 500);
+                        }
+                        
+                        // Refresh websites list
                         setTimeout(() => {
                             loadClonedWebsites();
                         }, 1000);
                     } else {
                         showStatus('Error starting preview: ' + data.error, 'error');
+                        console.error('Preview error:', data.error);
                     }
                 })
                 .catch(error => {
                     showStatus('Error: ' + error.message, 'error');
+                    console.error('Error in previewWebsite:', error);
+                })
+                .finally(() => {
+                    button.innerHTML = originalContent;
+                    button.disabled = false;
+                });
+        }
+        
+        function stopPreview(domain) {
+            const button = event.target.closest('.button');
+            const originalContent = button.innerHTML;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Stopping...';
+            button.disabled = true;
+            
+            showStatus(`Stopping preview server for ${domain}...`, 'info');
+            
+            fetch(`/api/stop_preview/${domain}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showStatus(`Preview stopped for ${domain}`, 'success');
+                        setTimeout(() => {
+                            loadClonedWebsites();
+                        }, 1000);
+                    } else {
+                        showStatus('Error stopping preview: ' + data.error, 'error');
+                    }
+                })
+                .catch(error => {
+                    showStatus('Error: ' + error.message, 'error');
+                    console.error('Error in stopPreview:', error);
+                })
+                .finally(() => {
+                    button.innerHTML = originalContent;
+                    button.disabled = false;
                 });
         }
         
@@ -1491,21 +1552,61 @@ def create_templates():
             }
         }
         
+        function resetForm() {
+            try {
+                console.log('=== RESET FORM DEBUG ===');
+                console.log('Before reset - isCloning:', isCloning);
+                console.log('Before reset - button disabled:', cloneBtn.disabled);
+                console.log('Before reset - button innerHTML:', cloneBtn.innerHTML);
+                
+                isCloning = false;
+                cloneBtn.disabled = false;
+                cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
+                progressFill.style.width = '0%';
+                progressContainer.style.display = 'none';
+                progressText.textContent = 'Initializing...';
+                
+                console.log('After reset - isCloning:', isCloning);
+                console.log('After reset - button disabled:', cloneBtn.disabled);
+                console.log('After reset - button innerHTML:', cloneBtn.innerHTML);
+                console.log('=== RESET FORM COMPLETE ===');
+            } catch (error) {
+                console.error('Error in resetForm:', error);
+                // Force reset even if there's an error
+                isCloning = false;
+                if (cloneBtn) {
+                    cloneBtn.disabled = false;
+                    cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
+                }
+                showStatus('Error resetting form: ' + error.message, 'error');
+            }
+        }
+        
         form.addEventListener('submit', (e) => {
             e.preventDefault();
+            
+            if (isCloning) {
+                console.log('Cloning already in progress, ignoring submission');
+                return;
+            }
             
             const url = urlInput.value.trim();
             const downloadLocation = currentDownloadLocation;
             
             if (!url) {
                 showStatus('Please enter a website URL', 'error');
+                console.error('No URL provided');
                 return;
             }
             
             if (!downloadLocation) {
                 showStatus('Please choose a download location', 'error');
+                console.error('No download location provided');
                 return;
             }
+            
+            // Set cloning state
+            isCloning = true;
             
             // Reset UI
             cloneBtn.disabled = true;
@@ -1514,6 +1615,8 @@ def create_templates():
             showStatus('Initializing cloning process...', 'info');
             progressFill.style.width = '0%';
             progressText.textContent = 'Initializing...';
+            
+            console.log('Starting clone process for URL:', url, 'Location:', downloadLocation);
             
             // Start cloning
             socket.emit('clone_website', { 
@@ -1528,11 +1631,20 @@ def create_templates():
                 progressFill.style.width = data.progress + '%';
                 progressText.textContent = `${data.message} (${data.progress}%)`;
             }
+            console.log('Status update:', data);
         });
         
         socket.on('clone_complete', (data) => {
+            console.log('Clone complete:', data);
+            
+            // Immediately reset the button state
+            isCloning = false;
+            cloneBtn.disabled = false;
+            cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
+            
             showStatus(`Website cloned successfully!`, 'success');
             progressText.textContent = 'Completed successfully!';
+            progressFill.style.width = '100%';
             
             const actionsHtml = `
                 <div class="download-actions">
@@ -1544,7 +1656,7 @@ def create_templates():
                         <i class="fas fa-eye"></i>
                         Preview Website
                     </button>
-                    <button class="button ghost" onclick="showPreviewSection()">
+                    <button class="button ghost" onclick="togglePreviewSection()">
                         <i class="fas fa-list"></i>
                         Show All Websites
                     </button>
@@ -1552,27 +1664,40 @@ def create_templates():
             `;
             
             status.innerHTML += actionsHtml;
-            resetForm();
+            
+            // Hide progress after a delay
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+                progressFill.style.width = '0%';
+                progressText.textContent = 'Initializing...';
+            }, 3000);
             
             // Auto-refresh websites list if it's visible
             if (previewSection.style.display === 'block') {
                 setTimeout(() => {
                     loadClonedWebsites();
-                }, 1000);
+                }, 1500);
             }
         });
         
         socket.on('clone_error', (data) => {
-            showStatus(`Error: ${data.error}`, 'error');
-            progressText.textContent = 'Error occurred';
-            resetForm();
-        });
-        
-        function resetForm() {
+            console.error('Clone error:', data);
+            
+            // Immediately reset the button state
+            isCloning = false;
             cloneBtn.disabled = false;
             cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
-            progressFill.style.width = '100%';
-        }
+            
+            showStatus(`Error: ${data.error}`, 'error');
+            progressText.textContent = 'Error occurred';
+            
+            // Hide progress after a delay
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+                progressFill.style.width = '0%';
+                progressText.textContent = 'Initializing...';
+            }, 3000);
+        });
         
         // Auto-load websites on page load if section is visible
         window.addEventListener('load', () => {
@@ -1587,7 +1712,7 @@ def create_templates():
             if (url && !url.match(/^https?:\/\//)) {
                 this.style.borderColor = 'var(--warning)';
             } else {
-                this.style.borderColor = 'var(--gray-200)';
+                this.style.borderColor = '';
             }
         });
 
@@ -1595,11 +1720,26 @@ def create_templates():
         document.addEventListener('keydown', function(e) {
             // Ctrl/Cmd + Enter to submit form
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                if (!cloneBtn.disabled) {
+                if (!cloneBtn.disabled && !isCloning) {
                     form.dispatchEvent(new Event('submit'));
                 }
             }
         });
+        
+        // Force reset button state on page visibility change
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible' && !isCloning) {
+                resetForm();
+            }
+        });
+        
+        // Backup reset mechanism
+        setInterval(() => {
+            if (!isCloning && cloneBtn.disabled) {
+                console.warn('Detected stuck button state, forcing reset');
+                resetForm();
+            }
+        }, 5000);
     </script>
 </body>
 </html>'''
@@ -1619,7 +1759,7 @@ if __name__ == '__main__':
     print("🌐 Web Cloner Pro - Enhanced Version")
     print("=" * 60)
     print("🚀 Features:")
-    print("   • Modern, attractive UI with glassmorphism design")
+    print("   • Modern, attractive UI with professional design")
     print("   • Choose custom download location")
     print("   • Preview cloned websites locally")
     print("   • Download ZIP archives")
@@ -1656,5 +1796,6 @@ if __name__ == '__main__':
             try:
                 if 'httpd' in server_info:
                     server_info['httpd'].shutdown()
+                    server_info['httpd'].server_close()
             except:
                 pass
