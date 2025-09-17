@@ -1464,10 +1464,10 @@ if __name__ == '__main__':
     print("   • Real-time progress tracking")
     print("   • Responsive design for all devices")
     print()
-    print("📱 Web Interface: http://0.0.0.0:" + str(port))
+    print("📱 Web Interface: http://localhost:" + str(port))
     print("📁 Download Location:", base_output_dir)
     print()
     print("🔧 Keep this terminal open to run the server")
     print("=" * 60)
     
-    socketio.run(app, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='localhost', port=port, allow_unsafe_werkzeug=True)
