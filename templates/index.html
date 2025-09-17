@@ -626,26 +626,6 @@
 
         <form id="cloneForm" class="form-section">
             <div class="input-group">
-                <label class="label" for="downloadLocation">
-                    <i class="fas fa-folder"></i>
-                    Download Location
-                </label>
-                <div class="location-selector">
-                    <input 
-                        type="text" 
-                        id="downloadLocation" 
-                        class="input" 
-                        placeholder="Select a folder to save websites..."
-                        readonly
-                    >
-                    <button type="button" class="button secondary" onclick="chooseDownloadLocation()">
-                        <i class="fas fa-folder-open"></i>
-                        Browse
-                    </button>
-                </div>
-            </div>
-
-            <div class="input-group">
                 <label class="label" for="url">
                     <i class="fas fa-link"></i>
                     Website URL
@@ -701,7 +681,6 @@
         const socket = io();
         const form = document.getElementById('cloneForm');
         const urlInput = document.getElementById('url');
-        const locationInput = document.getElementById('downloadLocation');
         const cloneBtn = document.getElementById('cloneBtn');
         const progressContainer = document.getElementById('progressContainer');
         const progressFill = document.getElementById('progressFill');
@@ -709,44 +688,6 @@
         const status = document.getElementById('status');
         const previewSection = document.getElementById('previewSection');
         const websitesList = document.getElementById('websitesList');
-        
-        let currentDownloadLocation = '';
-        
-        window.addEventListener('load', () => {
-            const defaultLocation = './cloned_websites';
-            locationInput.value = defaultLocation;
-            currentDownloadLocation = defaultLocation;
-            console.log('Default download location set:', defaultLocation);
-        });
-        
-        function chooseDownloadLocation() {
-            const location = prompt('Enter the full path where you want to save cloned websites:', currentDownloadLocation || './cloned_websites');
-            if (location) {
-                fetch('/api/set_download_location', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({location: location})
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        locationInput.value = location;
-                        currentDownloadLocation = location;
-                        showStatus('Download location set successfully!', 'success');
-                        console.log('Download location updated:', location);
-                    } else {
-                        showStatus('Error setting download location: ' + data.error, 'error');
-                        console.error('Error setting download location:', data.error);
-                    }
-                })
-                .catch(error => {
-                    showStatus('Error: ' + error.message, 'error');
-                    console.error('Error in chooseDownloadLocation:', error);
-                });
-            }
-        }
         
         function showPreviewSection() {
             const isVisible = previewSection.style.display === 'block';
@@ -768,7 +709,6 @@
             fetch('/api/get_cloned_websites')
                 .then(response => response.json())
                 .then(data => {
-                    console.log('Cloned websites data:', data);
                     if (data.websites && data.websites.length > 0) {
                         displayWebsites(data.websites);
                     } else {
@@ -789,7 +729,6 @@
                             <p>${error.message}</p>
                         </div>
                     `;
-                    console.error('Error loading cloned websites:', error);
                 });
         }
         
@@ -807,8 +746,8 @@
                             ${website.domain}
                         </div>
                         <div class="website-status">
-                            <span class="status-indicator ${website.has_preview ? 'online' : 'offline'}"></span>
-                            ${website.has_preview ? 'Preview Running' : 'Ready to Preview'}
+                            <span class="status-indicator online"></span>
+                            Preview Available
                         </div>
                     </div>
                     <div class="website-actions">
@@ -824,51 +763,26 @@
         }
         
         function previewWebsite(domain) {
-            showStatus(`Starting preview server for ${domain}...`, 'info');
-            console.log(`Attempting to preview website: ${domain}`);
+            showStatus(`Starting preview for ${domain}...`, 'info');
             
             fetch(`/api/preview/${domain}`)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    return response.json();
-                })
+                .then(response => response.json())
                 .then(data => {
-                    console.log('Preview response:', data);
                     if (data.success) {
                         const previewUrl = data.preview_url;
-                        let retryCount = 0;
-                        const maxRetries = 3;
-                        
-                        function tryOpenPreview() {
-                            console.log(`Opening preview URL: ${previewUrl} (Attempt ${retryCount + 1})`);
-                            const newWindow = window.open(previewUrl, '_blank');
-                            if (!newWindow) {
-                                console.warn('Popup blocked or failed to open');
-                                if (retryCount < maxRetries) {
-                                    retryCount++;
-                                    setTimeout(tryOpenPreview, 1000);
-                                } else {
-                                    showStatus('Error: Could not open preview. Please allow popups or open the URL manually: ' + previewUrl, 'error');
-                                }
-                            } else {
-                                showStatus(`Preview started for ${domain} at ${previewUrl}`, 'success');
-                                setTimeout(() => {
-                                    loadClonedWebsites();
-                                }, 1000);
-                            }
+                        const newWindow = window.open(previewUrl, '_blank');
+                        if (newWindow) {
+                            showStatus(`Preview started for ${domain}`, 'success');
+                            setTimeout(loadClonedWebsites, 1000);
+                        } else {
+                            showStatus('Please allow popups or open manually: ' + previewUrl, 'warning');
                         }
-                        
-                        tryOpenPreview();
                     } else {
-                        showStatus('Error starting preview: ' + data.error, 'error');
-                        console.error('Preview error:', data.error);
+                        showStatus('Error: ' + data.error, 'error');
                     }
                 })
                 .catch(error => {
                     showStatus('Error: ' + error.message, 'error');
-                    console.error('Error in previewWebsite:', error);
                 });
         }
         
@@ -885,35 +799,25 @@
         }
         
         function resetForm() {
-            try {
-                console.log('Resetting form');
-                cloneBtn.disabled = false;
-                cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
-                progressFill.style.width = '0%';
-                progressContainer.style.display = 'none';
-                progressText.textContent = 'Initializing...';
-            } catch (error) {
-                console.error('Error in resetForm:', error);
-                showStatus('Error resetting form: ' + error.message, 'error');
-            }
+            cloneBtn.disabled = false;
+            cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
+            progressContainer.style.display = 'none';
+            progressFill.style.width = '0%';
+            progressText.textContent = 'Initializing...';
         }
         
         form.addEventListener('submit', (e) => {
             e.preventDefault();
             
-            const url = urlInput.value.trim();
-            const downloadLocation = currentDownloadLocation;
-            
+            let url = urlInput.value.trim();
             if (!url) {
                 showStatus('Please enter a website URL', 'error');
-                console.error('No URL provided');
                 return;
             }
             
-            if (!downloadLocation) {
-                showStatus('Please choose a download location', 'error');
-                console.error('No download location provided');
-                return;
+            if (!url.match(/^https?:\/\//)) {
+                url = 'https://' + url;
+                urlInput.value = url;
             }
             
             cloneBtn.disabled = true;
@@ -923,12 +827,7 @@
             progressFill.style.width = '0%';
             progressText.textContent = 'Initializing...';
             
-            console.log('Starting clone process for URL:', url, 'Location:', downloadLocation);
-            
-            socket.emit('clone_website', { 
-                url: url, 
-                downloadLocation: downloadLocation 
-            });
+            socket.emit('clone_website', { url: url });
         });
         
         socket.on('status_update', (data) => {
@@ -937,11 +836,9 @@
                 progressFill.style.width = data.progress + '%';
                 progressText.textContent = `${data.message} (${data.progress}%)`;
             }
-            console.log('Status update:', data);
         });
         
         socket.on('clone_complete', (data) => {
-            console.log('Clone complete:', data);
             showStatus(`Website cloned successfully!`, 'success');
             progressText.textContent = 'Completed successfully!';
             
@@ -966,21 +863,11 @@
             resetForm();
             
             if (previewSection.style.display === 'block') {
-                setTimeout(() => {
-                    loadClonedWebsites();
-                }, 1000);
+                setTimeout(loadClonedWebsites, 1000);
             }
-            
-            setTimeout(() => {
-                if (cloneBtn.disabled) {
-                    console.warn('Forcing form reset due to timeout');
-                    resetForm();
-                }
-            }, 2000);
         });
         
         socket.on('clone_error', (data) => {
-            console.error('Clone error:', data);
             showStatus(`Error: ${data.error}`, 'error');
             progressText.textContent = 'Error occurred';
             resetForm();

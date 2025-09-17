@@ -1,38 +1,48 @@
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit
 import os
-import sys
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse, unquote
+from urllib.parse import urljoin, urlparse
 import re
 import base64
 import mimetypes
-import threading
 from threading import Thread
 import time
-import webbrowser
-import http.server
-import socketserver
-import socket
-from pathlib import Path
 import zipfile
 import shutil
-import json
+import tempfile
+import uuid
+from datetime import datetime
+from werkzeug.exceptions import abort
+
+# Get port from environment variable (required for Render)
+port = int(os.environ.get('PORT', 5000))
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'web_cloner_secret_key'
-socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins="*")  # Use gevent instead of eventlet
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'web_cloner_secret_key_' + str(uuid.uuid4()))
 
-# Global variables for server management
-preview_servers = {}  # Store multiple preview servers
-current_preview_port = 9000
+# Configure SocketIO for production deployment with gevent
+socketio = SocketIO(app, 
+                    async_mode='gevent',  
+                    cors_allowed_origins="*",
+                    logger=False,
+                    engineio_logger=False)
+
+# Use temp directory on Render, else current dir
+if 'RENDER' in os.environ:
+    base_output_dir = tempfile.gettempdir()
+else:
+    base_output_dir = os.path.join(os.getcwd(), 'cloned_websites')
+os.makedirs(base_output_dir, exist_ok=True)
 
 class WebClonerCore:
-    """Core web cloning functionality - unchanged"""
+    """Core web cloning functionality"""
     
-    def __init__(self, socketio_instance=None):
+    def __init__(self, socketio_instance=None, sid=None, namespace='/'):
         self.socketio = socketio_instance
+        self.sid = sid
+        self.namespace = namespace
         self.downloaded_resources = set()
         self.session = requests.Session()
         self.session.headers.update({
@@ -40,22 +50,24 @@ class WebClonerCore:
         })
     
     def emit_status(self, message, progress=None):
-        """Emit status update via SocketIO"""
-        if self.socketio:
+        """Emit status update via SocketIO with explicit sid and namespace"""
+        if self.socketio and self.sid:
             data = {'message': message}
             if progress is not None:
                 data['progress'] = progress
-            self.socketio.emit('status_update', data)
+            self.socketio.emit('status_update', data, room=self.sid, namespace=self.namespace)
         print(f"Status: {message} ({progress}%)" if progress else f"Status: {message}")
     
     def clone_website(self, url, output_base_dir):
-        """Main cloning function - unchanged"""
+        """Main cloning function"""
         try:
             self.emit_status("Starting website cloning...", 0)
             
             parsed_url = urlparse(url)
             domain = parsed_url.netloc.replace(':', '_')
-            output_dir = os.path.join(output_base_dir, domain)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            unique_dir = f"{domain}_{timestamp}"
+            output_dir = os.path.join(output_base_dir, unique_dir)
             
             os.makedirs(output_dir, exist_ok=True)
             assets_dir = os.path.join(output_dir, 'assets')
@@ -78,6 +90,9 @@ class WebClonerCore:
             self.emit_status("Processing JavaScript files...", 70)
             self.process_js_files(soup, url, assets_dir)
             
+            self.emit_status("Processing fonts and other resources...", 75)
+            self.process_fonts_and_resources(soup, url, assets_dir)
+            
             self.emit_status("Processing internal links...", 80)
             self.process_internal_links(soup, url, output_dir)
             
@@ -87,7 +102,7 @@ class WebClonerCore:
                 f.write(str(soup))
             
             self.emit_status("Creating downloadable archive...", 95)
-            zip_path = self.create_zip_archive(output_dir)
+            zip_path = self.create_zip_archive(output_dir, unique_dir)
             
             self.emit_status(f"Website cloned successfully!", 100)
             
@@ -95,7 +110,7 @@ class WebClonerCore:
                 'success': True,
                 'output_dir': output_dir,
                 'zip_path': zip_path,
-                'domain': domain
+                'domain': unique_dir
             }
             
         except Exception as e:
@@ -105,10 +120,10 @@ class WebClonerCore:
                 'error': str(e)
             }
     
-    def create_zip_archive(self, source_dir):
+    def create_zip_archive(self, source_dir, unique_name):
         """Create ZIP archive of cloned website"""
-        zip_name = f"{os.path.basename(source_dir)}_cloned.zip"
-        zip_path = os.path.join(os.path.dirname(source_dir), zip_name)
+        zip_name = f"{unique_name}_cloned.zip"
+        zip_path = os.path.join(base_output_dir, zip_name)
         
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for root, dirs, files in os.walk(source_dir):
@@ -123,7 +138,7 @@ class WebClonerCore:
         """Download and process all images"""
         img_tags = soup.find_all(['img', 'source'])
         
-        for i, tag in enumerate(img_tags):
+        for tag in img_tags:
             try:
                 img_url = None
                 if tag.get('src'):
@@ -147,7 +162,7 @@ class WebClonerCore:
                                 del tag[attr]
                 
             except Exception as e:
-                print(f"Error processing image {i}: {e}")
+                print(f"Error processing image: {e}")
         
         self.process_css_background_images(soup, base_url, assets_dir)
     
@@ -200,6 +215,17 @@ class WebClonerCore:
                 local_path = self.download_resource(src, base_url, assets_dir)
                 if local_path:
                     script['src'] = local_path
+    
+    def process_fonts_and_resources(self, soup, base_url, assets_dir):
+        """Process font files and other resources"""
+        for link in soup.find_all('link'):
+            href = link.get('href')
+            if href:
+                rel = link.get('rel', [])
+                if 'stylesheet' not in rel:
+                    local_path = self.download_resource(href, base_url, assets_dir)
+                    if local_path:
+                        link['href'] = local_path
     
     def process_internal_links(self, soup, base_url, output_dir):
         """Process internal page links"""
@@ -307,89 +333,6 @@ class WebClonerCore:
         filename = os.path.basename(urlparse(url).path) or 'resource'
         return f"assets/{filename}"
 
-# Preview server management
-def find_available_port(start_port=9000):
-    """Find an available port for preview server"""
-    for port in range(start_port, start_port + 100):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(('localhost', port))
-                return port
-        except OSError:
-            continue
-    return None
-
-def start_preview_server(folder_path, domain):
-    """Start preview server for a cloned website"""
-    global preview_servers, current_preview_port
-    
-    port = find_available_port(current_preview_port)
-    if port is None:
-        print(f"Error: No available port found for preview server (domain: {domain})")
-        return None
-    
-    current_preview_port = port + 1
-    
-    class CustomHandler(http.server.SimpleHTTPRequestHandler):
-        def end_headers(self):
-            self.send_header('Cache-Control', 'no-cache')
-            super().end_headers()
-        
-        def do_GET(self):
-            if self.path == '/' or self.path == '':
-                self.path = '/index.html'
-            elif self.path.endswith('/'):
-                self.path += 'index.html'
-            
-            if '.' not in os.path.basename(self.path):
-                if os.path.exists(os.path.join(folder_path, self.path.lstrip('/') + '.html')):
-                    self.path += '.html'
-                elif os.path.exists(os.path.join(folder_path, self.path.lstrip('/') + '/index.html')):
-                    self.path += '/index.html'
-            
-            try:
-                print(f"Serving file: {self.path} for domain: {domain}")
-                return super().do_GET()
-            except Exception as e:
-                print(f"Error serving file {self.path}: {e}")
-                self.send_error(404, f"File not found: {self.path}")
-        
-        def log_message(self, format, *args):
-            print(f"Preview server request for {domain}: {format % args}")
-    
-    def run_server():
-        original_dir = os.getcwd()
-        try:
-            os.chdir(folder_path)
-            print(f"Starting preview server for {domain} on port {port} at path {folder_path}")
-            with socketserver.TCPServer(("localhost", port), CustomHandler) as httpd:
-                preview_servers[domain] = {'httpd': httpd, 'port': port, 'thread': None}
-                httpd.serve_forever()
-        except Exception as e:
-            print(f"Preview server error for {domain}: {e}")
-        finally:
-            os.chdir(original_dir)
-            if domain in preview_servers:
-                del preview_servers[domain]
-    
-    server_thread = Thread(target=run_server, daemon=True)
-    server_thread.start()
-    preview_servers[domain] = {'port': port, 'thread': server_thread}
-    
-    time.sleep(1)
-    
-    try:
-        response = requests.get(f"http://localhost:{port}/index.html", timeout=5)
-        if response.status_code == 200:
-            print(f"Preview server for {domain} started successfully on port {port}")
-            return port
-        else:
-            print(f"Preview server for {domain} failed to serve index.html (status: {response.status_code})")
-            return None
-    except Exception as e:
-        print(f"Error verifying preview server for {domain}: {e}")
-        return None
-
 # Flask routes
 @app.route('/')
 def index():
@@ -399,46 +342,34 @@ def index():
 def download_file(filename):
     """Serve downloaded files"""
     try:
-        downloads_dir = os.path.join(os.getcwd(), 'cloned_websites')
-        return send_from_directory(downloads_dir, filename, as_attachment=True)
+        if '..' in filename or filename.startswith('/'):
+            return jsonify({'error': 'Invalid filename'}), 400
+            
+        file_path = os.path.join(base_output_dir, filename)
+        if os.path.exists(file_path) and os.path.commonpath([file_path, base_output_dir]) == base_output_dir:
+            return send_from_directory(base_output_dir, filename, as_attachment=True)
+        else:
+            return jsonify({'error': 'File not found'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 404
-
-@app.route('/api/set_download_location', methods=['POST'])
-def set_download_location():
-    """Set download location"""
-    try:
-        data = request.get_json()
-        location = data.get('location', '')
-        
-        if not location:
-            return jsonify({'error': 'No location provided'}), 400
-        
-        os.makedirs(location, exist_ok=True)
-        
-        return jsonify({'success': True, 'location': location})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/get_cloned_websites')
 def get_cloned_websites():
     """Get list of cloned websites"""
     try:
-        downloads_dir = os.path.join(os.getcwd(), 'cloned_websites')
-        if not os.path.exists(downloads_dir):
-            return jsonify({'websites': []})
-        
         websites = []
-        for item in os.listdir(downloads_dir):
-            item_path = os.path.join(downloads_dir, item)
+        for item in os.listdir(base_output_dir):
+            item_path = os.path.join(base_output_dir, item)
             if os.path.isdir(item_path):
                 index_path = os.path.join(item_path, 'index.html')
                 if os.path.exists(index_path):
                     websites.append({
                         'domain': item,
                         'path': item_path,
-                        'has_preview': item in preview_servers
+                        'has_preview': True  # Previews are always available via Flask
                     })
+        
+        websites.sort(key=lambda x: os.path.getctime(x['path']), reverse=True)
         
         return jsonify({'websites': websites})
     except Exception as e:
@@ -446,10 +377,12 @@ def get_cloned_websites():
 
 @app.route('/api/preview/<domain>')
 def preview_website(domain):
-    """Start preview for a cloned website"""
+    """Get preview URL for a cloned website"""
     try:
-        downloads_dir = os.path.join(os.getcwd(), 'cloned_websites')
-        website_path = os.path.join(downloads_dir, domain)
+        if '..' in domain or '/' in domain:
+            return jsonify({'error': 'Invalid domain'}), 400
+            
+        website_path = os.path.join(base_output_dir, domain)
         
         if not os.path.exists(website_path):
             return jsonify({'error': 'Website not found'}), 404
@@ -458,56 +391,150 @@ def preview_website(domain):
         if not os.path.exists(index_path):
             return jsonify({'error': 'No index.html found'}), 404
         
-        if domain in preview_servers:
-            port = preview_servers[domain]['port']
-        else:
-            port = start_preview_server(website_path, domain)
-            if port is None:
-                return jsonify({'error': 'Could not start preview server'}), 500
+        preview_url = f"/preview/{domain}/"
         
-        preview_url = f"http://localhost:{port}"
         return jsonify({
             'success': True,
             'preview_url': preview_url,
-            'domain': domain,
-            'port': port
+            'domain': domain
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/preview/<domain>/')
+def preview_root(domain):
+    return serve_cloned_file(domain, '')
+
+@app.route('/preview/<domain>/<path:path>')
+def preview_file(domain, path):
+    return serve_cloned_file(domain, path)
+
+def serve_cloned_file(domain, path):
+    directory = os.path.join(base_output_dir, domain)
+    if '..' in domain or '..' in path:
+        abort(404)
+    if not os.path.exists(directory):
+        abort(404)
+
+    if not path:
+        path = 'index.html'
+    elif path.endswith('/'):
+        path += 'index.html'
+
+    full_path = os.path.join(directory, path)
+    if not os.path.exists(full_path) and '.' not in os.path.basename(path):
+        html_path = path + '.html'
+        if os.path.exists(os.path.join(directory, html_path)):
+            path = html_path
+        else:
+            index_path = os.path.join(path, 'index.html')
+            if os.path.exists(os.path.join(directory, index_path)):
+                path = index_path
+
+    if not os.path.exists(os.path.join(directory, path)) or not os.path.isfile(os.path.join(directory, path)):
+        abort(404)
+
+    response = send_from_directory(directory, path)
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
+@app.route('/api/delete_website/<domain>', methods=['DELETE'])
+def delete_website(domain):
+    """Delete a specific cloned website"""
+    try:
+        if '..' in domain or '/' in domain:
+            return jsonify({'error': 'Invalid domain'}), 400
+            
+        website_path = os.path.join(base_output_dir, domain)
+        zip_path = os.path.join(base_output_dir, f"{domain}_cloned.zip")
+        
+        deleted = False
+        if os.path.exists(website_path):
+            shutil.rmtree(website_path)
+            deleted = True
+        
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+            deleted = True
+        
+        if deleted:
+            return jsonify({'success': True, 'message': f'Website {domain} deleted'})
+        else:
+            return jsonify({'error': 'Website not found'}), 404
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/cleanup', methods=['POST'])
+def cleanup_old_files():
+    """Cleanup old files"""
+    try:
+        current_time = time.time()
+        cleanup_count = 0
+        max_age_hours = 24
+        
+        for item in os.listdir(base_output_dir):
+            item_path = os.path.join(base_output_dir, item)
+            if os.path.isfile(item_path):
+                file_age = current_time - os.path.getctime(item_path)
+                if file_age > (max_age_hours * 3600):
+                    try:
+                        os.remove(item_path)
+                        cleanup_count += 1
+                    except:
+                        pass
+            elif os.path.isdir(item_path):
+                dir_age = current_time - os.path.getctime(item_path)
+                if dir_age > (max_age_hours * 3600):
+                    try:
+                        shutil.rmtree(item_path)
+                        cleanup_count += 1
+                    except:
+                        pass
+        
+        return jsonify({'success': True, 'cleaned': cleanup_count})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # SocketIO events
+@socketio.on('connect')
+def handle_connect():
+    print(f"Client connected: {request.sid}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print(f"Client disconnected: {request.sid}")
+
 @socketio.on('clone_website')
 def handle_clone_request(data):
     """Handle website cloning request"""
+    sid = request.sid
+    namespace = request.namespace
+    
     def clone_task():
         url = data.get('url')
-        download_location = data.get('downloadLocation', os.path.join(os.getcwd(), 'cloned_websites'))
-        
         if not url:
-            emit('clone_error', {'error': 'No URL provided'})
+            socketio.emit('clone_error', {'error': 'No URL provided'}, room=sid, namespace=namespace)
             return
         
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url
         
-        try:
-            os.makedirs(download_location, exist_ok=True)
-        except Exception as e:
-            emit('clone_error', {'error': f'Cannot create download directory: {str(e)}'})
-            return
-        
-        cloner = WebClonerCore(socketio)
-        result = cloner.clone_website(url, download_location)
+        cloner = WebClonerCore(socketio, sid, namespace)
+        result = cloner.clone_website(url, base_output_dir)
         
         if result['success']:
             zip_filename = os.path.basename(result['zip_path'])
-            emit('clone_complete', {
+            socketio.emit('clone_complete', {
                 'domain': result['domain'],
                 'download_url': f'/download/{zip_filename}',
                 'folder_path': result['output_dir']
-            })
+            }, room=sid, namespace=namespace)
         else:
-            emit('clone_error', {'error': result['error']})
+            socketio.emit('clone_error', {'error': result['error']}, room=sid, namespace=namespace)
     
     thread = Thread(target=clone_task)
     thread.daemon = True
@@ -1147,26 +1174,6 @@ def create_templates():
 
         <form id="cloneForm" class="form-section">
             <div class="input-group">
-                <label class="label" for="downloadLocation">
-                    <i class="fas fa-folder"></i>
-                    Download Location
-                </label>
-                <div class="location-selector">
-                    <input 
-                        type="text" 
-                        id="downloadLocation" 
-                        class="input" 
-                        placeholder="Select a folder to save websites..."
-                        readonly
-                    >
-                    <button type="button" class="button secondary" onclick="chooseDownloadLocation()">
-                        <i class="fas fa-folder-open"></i>
-                        Browse
-                    </button>
-                </div>
-            </div>
-
-            <div class="input-group">
                 <label class="label" for="url">
                     <i class="fas fa-link"></i>
                     Website URL
@@ -1222,7 +1229,6 @@ def create_templates():
         const socket = io();
         const form = document.getElementById('cloneForm');
         const urlInput = document.getElementById('url');
-        const locationInput = document.getElementById('downloadLocation');
         const cloneBtn = document.getElementById('cloneBtn');
         const progressContainer = document.getElementById('progressContainer');
         const progressFill = document.getElementById('progressFill');
@@ -1230,44 +1236,6 @@ def create_templates():
         const status = document.getElementById('status');
         const previewSection = document.getElementById('previewSection');
         const websitesList = document.getElementById('websitesList');
-        
-        let currentDownloadLocation = '';
-        
-        window.addEventListener('load', () => {
-            const defaultLocation = './cloned_websites';
-            locationInput.value = defaultLocation;
-            currentDownloadLocation = defaultLocation;
-            console.log('Default download location set:', defaultLocation);
-        });
-        
-        function chooseDownloadLocation() {
-            const location = prompt('Enter the full path where you want to save cloned websites:', currentDownloadLocation || './cloned_websites');
-            if (location) {
-                fetch('/api/set_download_location', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({location: location})
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        locationInput.value = location;
-                        currentDownloadLocation = location;
-                        showStatus('Download location set successfully!', 'success');
-                        console.log('Download location updated:', location);
-                    } else {
-                        showStatus('Error setting download location: ' + data.error, 'error');
-                        console.error('Error setting download location:', data.error);
-                    }
-                })
-                .catch(error => {
-                    showStatus('Error: ' + error.message, 'error');
-                    console.error('Error in chooseDownloadLocation:', error);
-                });
-            }
-        }
         
         function showPreviewSection() {
             const isVisible = previewSection.style.display === 'block';
@@ -1289,7 +1257,6 @@ def create_templates():
             fetch('/api/get_cloned_websites')
                 .then(response => response.json())
                 .then(data => {
-                    console.log('Cloned websites data:', data);
                     if (data.websites && data.websites.length > 0) {
                         displayWebsites(data.websites);
                     } else {
@@ -1310,7 +1277,6 @@ def create_templates():
                             <p>${error.message}</p>
                         </div>
                     `;
-                    console.error('Error loading cloned websites:', error);
                 });
         }
         
@@ -1328,8 +1294,8 @@ def create_templates():
                             ${website.domain}
                         </div>
                         <div class="website-status">
-                            <span class="status-indicator ${website.has_preview ? 'online' : 'offline'}"></span>
-                            ${website.has_preview ? 'Preview Running' : 'Ready to Preview'}
+                            <span class="status-indicator online"></span>
+                            Preview Available
                         </div>
                     </div>
                     <div class="website-actions">
@@ -1345,51 +1311,26 @@ def create_templates():
         }
         
         function previewWebsite(domain) {
-            showStatus(`Starting preview server for ${domain}...`, 'info');
-            console.log(`Attempting to preview website: ${domain}`);
+            showStatus(`Starting preview for ${domain}...`, 'info');
             
             fetch(`/api/preview/${domain}`)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    return response.json();
-                })
+                .then(response => response.json())
                 .then(data => {
-                    console.log('Preview response:', data);
                     if (data.success) {
                         const previewUrl = data.preview_url;
-                        let retryCount = 0;
-                        const maxRetries = 3;
-                        
-                        function tryOpenPreview() {
-                            console.log(`Opening preview URL: ${previewUrl} (Attempt ${retryCount + 1})`);
-                            const newWindow = window.open(previewUrl, '_blank');
-                            if (!newWindow) {
-                                console.warn('Popup blocked or failed to open');
-                                if (retryCount < maxRetries) {
-                                    retryCount++;
-                                    setTimeout(tryOpenPreview, 1000);
-                                } else {
-                                    showStatus('Error: Could not open preview. Please allow popups or open the URL manually: ' + previewUrl, 'error');
-                                }
-                            } else {
-                                showStatus(`Preview started for ${domain} at ${previewUrl}`, 'success');
-                                setTimeout(() => {
-                                    loadClonedWebsites();
-                                }, 1000);
-                            }
+                        const newWindow = window.open(previewUrl, '_blank');
+                        if (newWindow) {
+                            showStatus(`Preview started for ${domain}`, 'success');
+                            setTimeout(loadClonedWebsites, 1000);
+                        } else {
+                            showStatus('Please allow popups or open manually: ' + previewUrl, 'warning');
                         }
-                        
-                        tryOpenPreview();
                     } else {
-                        showStatus('Error starting preview: ' + data.error, 'error');
-                        console.error('Preview error:', data.error);
+                        showStatus('Error: ' + data.error, 'error');
                     }
                 })
                 .catch(error => {
                     showStatus('Error: ' + error.message, 'error');
-                    console.error('Error in previewWebsite:', error);
                 });
         }
         
@@ -1406,35 +1347,25 @@ def create_templates():
         }
         
         function resetForm() {
-            try {
-                console.log('Resetting form');
-                cloneBtn.disabled = false;
-                cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
-                progressFill.style.width = '0%';
-                progressContainer.style.display = 'none';
-                progressText.textContent = 'Initializing...';
-            } catch (error) {
-                console.error('Error in resetForm:', error);
-                showStatus('Error resetting form: ' + error.message, 'error');
-            }
+            cloneBtn.disabled = false;
+            cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
+            progressContainer.style.display = 'none';
+            progressFill.style.width = '0%';
+            progressText.textContent = 'Initializing...';
         }
         
         form.addEventListener('submit', (e) => {
             e.preventDefault();
             
-            const url = urlInput.value.trim();
-            const downloadLocation = currentDownloadLocation;
-            
+            let url = urlInput.value.trim();
             if (!url) {
                 showStatus('Please enter a website URL', 'error');
-                console.error('No URL provided');
                 return;
             }
             
-            if (!downloadLocation) {
-                showStatus('Please choose a download location', 'error');
-                console.error('No download location provided');
-                return;
+            if (!url.match(/^https?:\/\//)) {
+                url = 'https://' + url;
+                urlInput.value = url;
             }
             
             cloneBtn.disabled = true;
@@ -1444,12 +1375,7 @@ def create_templates():
             progressFill.style.width = '0%';
             progressText.textContent = 'Initializing...';
             
-            console.log('Starting clone process for URL:', url, 'Location:', downloadLocation);
-            
-            socket.emit('clone_website', { 
-                url: url, 
-                downloadLocation: downloadLocation 
-            });
+            socket.emit('clone_website', { url: url });
         });
         
         socket.on('status_update', (data) => {
@@ -1458,11 +1384,9 @@ def create_templates():
                 progressFill.style.width = data.progress + '%';
                 progressText.textContent = `${data.message} (${data.progress}%)`;
             }
-            console.log('Status update:', data);
         });
         
         socket.on('clone_complete', (data) => {
-            console.log('Clone complete:', data);
             showStatus(`Website cloned successfully!`, 'success');
             progressText.textContent = 'Completed successfully!';
             
@@ -1487,21 +1411,11 @@ def create_templates():
             resetForm();
             
             if (previewSection.style.display === 'block') {
-                setTimeout(() => {
-                    loadClonedWebsites();
-                }, 1000);
+                setTimeout(loadClonedWebsites, 1000);
             }
-            
-            setTimeout(() => {
-                if (cloneBtn.disabled) {
-                    console.warn('Forcing form reset due to timeout');
-                    resetForm();
-                }
-            }, 2000);
         });
         
         socket.on('clone_error', (data) => {
-            console.error('Clone error:', data);
             showStatus(`Error: ${data.error}`, 'error');
             progressText.textContent = 'Error occurred';
             resetForm();
@@ -1538,50 +1452,22 @@ def create_templates():
 
 if __name__ == '__main__':
     create_templates()
-    default_output = os.path.join(os.getcwd(), 'cloned_websites')
-    os.makedirs(default_output, exist_ok=True)
     
     print("=" * 60)
     print("🌐 Web Cloner Pro - Enhanced Version")
     print("=" * 60)
     print("🚀 Features:")
     print("   • Modern, attractive UI with professional design")
-    print("   • Choose custom download location")
     print("   • Preview cloned websites locally")
     print("   • Download ZIP archives")
     print("   • Manage multiple cloned sites")
     print("   • Real-time progress tracking")
     print("   • Responsive design for all devices")
     print()
-    print("📱 Web Interface: http://localhost:5000")
-    print("📁 Default Download Location:", default_output)
+    print("📱 Web Interface: http://0.0.0.0:" + str(port))
+    print("📁 Download Location:", base_output_dir)
     print()
     print("🔧 Keep this terminal open to run the server")
     print("=" * 60)
     
-    def open_browser():
-        time.sleep(1.5)
-        try:
-            webbrowser.open('http://localhost:5000')
-        except:
-            pass
-    
-    Thread(target=open_browser, daemon=True).start()
-    
-    try:
-        from gevent import pywsgi
-        from geventwebsocket.handler import WebSocketHandler
-        server = pywsgi.WSGIServer(('localhost', 5000), app, handler_class=WebSocketHandler)
-        print("Starting server with gevent...")
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n🛑 Server stopped by user")
-    except Exception as e:
-        print(f"❌ Server error: {e}")
-    finally:
-        for domain, server_info in preview_servers.items():
-            try:
-                if 'httpd' in server_info:
-                    server_info['httpd'].shutdown()
-            except:
-                pass
+    socketio.run(app, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
