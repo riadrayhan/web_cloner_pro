@@ -19,6 +19,12 @@ from pathlib import Path
 import zipfile
 import shutil
 import json
+import logging
+
+# Suppress logging for engineio, socketio, and werkzeug to hide "Invalid session" errors
+logging.getLogger('engineio').setLevel(logging.ERROR)
+logging.getLogger('socketio').setLevel(logging.ERROR)
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'web_cloner_secret_key'
@@ -572,7 +578,7 @@ def create_templates():
     templates_dir = 'templates'
     os.makedirs(templates_dir, exist_ok=True)
     
-    # Fixed HTML with proper button reset and enhanced preview
+    # Fixed HTML with proper button reset and enhanced preview, including SocketIO reconnection handling
     html_content = '''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1312,7 +1318,51 @@ def create_templates():
     </div>
 
     <script>
-        const socket = io();
+        // SocketIO with enhanced reconnection handling
+        const socket = io({
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            randomizationFactor: 0.5
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            showStatus('Connection error, retrying...', 'error');
+        });
+
+        socket.on('reconnect', (attempt) => {
+            console.log(`Reconnected successfully after ${attempt} attempts`);
+            showStatus('Reconnected to server!', 'success');
+        });
+
+        socket.on('reconnect_error', (error) => {
+            console.error('Reconnection error:', error);
+            showStatus('Failed to reconnect: ' + error.message, 'error');
+        });
+
+        socket.on('reconnect_failed', () => {
+            console.error('Reconnection failed after maximum attempts');
+            showStatus('Failed to reconnect to server. Please refresh the page.', 'error');
+        });
+
+        let disconnectTimeout;
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            showStatus('Disconnected from server, attempting to reconnect...', 'warning');
+            disconnectTimeout = setTimeout(() => {
+                showStatus('Server unavailable. Reloading page...', 'error');
+                setTimeout(() => location.reload(), 2000);
+            }, 10000); // Reload after 10 seconds of disconnection
+        });
+
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            clearTimeout(disconnectTimeout);
+            showStatus('Connected to server!', 'success');
+        });
+
         const form = document.getElementById('cloneForm');
         const urlInput = document.getElementById('url');
         const locationInput = document.getElementById('downloadLocation');
