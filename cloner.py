@@ -135,7 +135,6 @@ class WebClonerCore:
         
         return zip_path
     
-    # Your existing methods (process_images, process_css_files, etc.)
     def process_images(self, soup, base_url, assets_dir):
         """Download and process all images"""
         img_tags = soup.find_all(['img', 'source'])
@@ -343,6 +342,7 @@ def start_preview_server(folder_path, domain):
     # Find available port
     port = find_available_port(current_preview_port)
     if port is None:
+        print(f"Error: No available port found for preview server (domain: {domain})")
         return None
     
     current_preview_port = port + 1
@@ -360,23 +360,26 @@ def start_preview_server(folder_path, domain):
                 self.path += 'index.html'
             
             if '.' not in os.path.basename(self.path):
-                if os.path.exists(self.path.lstrip('/') + '.html'):
+                if os.path.exists(os.path.join(folder_path, self.path.lstrip('/') + '.html')):
                     self.path += '.html'
-                elif os.path.exists(self.path.lstrip('/') + '/index.html'):
+                elif os.path.exists(os.path.join(folder_path, self.path.lstrip('/') + '/index.html')):
                     self.path += '/index.html'
             
             try:
+                print(f"Serving file: {self.path} for domain: {domain}")
                 return super().do_GET()
-            except Exception:
-                self.send_error(404, "File not found")
+            except Exception as e:
+                print(f"Error serving file {self.path}: {e}")
+                self.send_error(404, f"File not found: {self.path}")
         
         def log_message(self, format, *args):
-            pass
+            print(f"Preview server request for {domain}: {format % args}")
     
     def run_server():
         original_dir = os.getcwd()
         try:
             os.chdir(folder_path)
+            print(f"Starting preview server for {domain} on port {port} at path {folder_path}")
             with socketserver.TCPServer(("localhost", port), CustomHandler) as httpd:
                 preview_servers[domain] = {'httpd': httpd, 'port': port, 'thread': None}
                 httpd.serve_forever()
@@ -392,7 +395,21 @@ def start_preview_server(folder_path, domain):
     server_thread.start()
     preview_servers[domain] = {'port': port, 'thread': server_thread}
     
-    return port
+    # Wait briefly to ensure server starts
+    time.sleep(1)
+    
+    # Verify server is running
+    try:
+        response = requests.get(f"http://localhost:{port}/index.html", timeout=5)
+        if response.status_code == 200:
+            print(f"Preview server for {domain} started successfully on port {port}")
+            return port
+        else:
+            print(f"Preview server for {domain} failed to serve index.html (status: {response.status_code})")
+            return None
+    except Exception as e:
+        print(f"Error verifying preview server for {domain}: {e}")
+        return None
 
 # Flask routes
 @app.route('/')
@@ -527,307 +544,659 @@ def create_templates():
     templates_dir = 'templates'
     os.makedirs(templates_dir, exist_ok=True)
     
-    # Enhanced main template with preview and download location features
+    # Updated HTML with fixes for button and preview
     html_content = '''<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Cloner - Professional Website Downloader</title>
+    <title>Web Cloner Pro - Professional Website Downloader</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.0/socket.io.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
+        :root {
+            --primary: #1e3a8a; /* Deep Indigo */
+            --primary-dark: #1e293b;
+            --secondary: #facc15; /* Gold Accent */
+            --secondary-dark: #ca8a04;
+            --background: #f8fafc;
+            --card-bg: rgba(255, 255, 255, 0.95);
+            --text-primary: #1e293b;
+            --text-secondary: #475569;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
+            --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.15);
+            --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.2);
+            --ring: 0 0 0 3px rgba(30, 58, 138, 0.2);
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--background);
             min-height: 100vh;
-            padding: 20px;
-        }
-        
-        .container {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
             padding: 40px;
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            max-width: 800px;
+            font-size: 16px;
+            line-height: 1.6;
+            color: var(--text-primary);
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, rgba(30, 58, 138, 0.05) 0%, rgba(250, 204, 21, 0.05) 100%);
+            z-index: -1;
+        }
+
+        .container {
+            max-width: 1000px;
             margin: 0 auto;
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: var(--shadow-lg);
+            position: relative;
+            z-index: 1;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
-        
-        .title {
+
+        .container:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .header {
             text-align: center;
-            color: #333;
-            margin-bottom: 30px;
+            margin-bottom: 40px;
+        }
+
+        .title {
             font-size: 2.5rem;
-            font-weight: bold;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            font-weight: 700;
+            color: var(--primary);
+            letter-spacing: -0.025em;
+            margin-bottom: 12px;
         }
-        
-        .input-group {
-            margin-bottom: 25px;
-        }
-        
-        .label {
-            display: block;
-            margin-bottom: 8px;
-            color: #555;
-            font-weight: 600;
+
+        .subtitle {
             font-size: 1.1rem;
+            color: var(--text-secondary);
+            font-weight: 400;
         }
-        
+
+        .logo {
+            font-size: 3rem;
+            color: var(--primary);
+            margin-bottom: 16px;
+        }
+
+        .info-card {
+            background: rgba(30, 58, 138, 0.05);
+            border: 1px solid rgba(30, 58, 138, 0.1);
+            padding: 24px;
+            border-radius: 12px;
+            margin-bottom: 32px;
+        }
+
+        .info-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .info-steps {
+            list-style: none;
+            color: var(--text-secondary);
+        }
+
+        .info-steps li {
+            margin: 12px 0;
+            padding-left: 28px;
+            position: relative;
+            font-size: 0.95rem;
+        }
+
+        .info-steps li::before {
+            content: counter(step-counter);
+            counter-increment: step-counter;
+            position: absolute;
+            left: 0;
+            top: 2px;
+            background: var(--primary);
+            color: white;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .info-steps {
+            counter-reset: step-counter;
+        }
+
+        .form-section {
+            margin-bottom: 32px;
+        }
+
+        .input-group {
+            margin-bottom: 24px;
+        }
+
+        .label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .label i {
+            color: var(--primary);
+        }
+
         .input {
             width: 100%;
-            padding: 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            font-size: 1rem;
-            transition: all 0.3s ease;
-            background: rgba(255, 255, 255, 0.8);
+            padding: 12px 16px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+            background: white;
         }
-        
+
         .input:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: var(--primary);
+            box-shadow: var(--ring);
         }
-        
+
+        .input:hover {
+            border-color: var(--primary-dark);
+        }
+
         .button {
-            padding: 15px 30px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 12px 24px;
+            background: var(--primary);
             color: white;
             border: none;
-            border-radius: 10px;
-            font-size: 1.2rem;
-            font-weight: bold;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
             cursor: pointer;
-            transition: all 0.3s ease;
-            margin-right: 10px;
-            margin-bottom: 10px;
+            transition: background 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
-        
+
         .button:hover {
+            background: var(--primary-dark);
             transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+            box-shadow: var(--shadow-md);
         }
-        
+
         .button:disabled {
-            background: #ccc;
+            background: #94a3b8;
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
         }
-        
+
         .button.secondary {
-            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+            background: var(--secondary);
+            color: var(--primary-dark);
         }
-        
+
+        .button.secondary:hover {
+            background: var(--secondary-dark);
+        }
+
         .button.success {
-            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            background: var(--success);
         }
-        
+
         .button.danger {
-            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            background: var(--danger);
         }
-        
+
+        .button.ghost {
+            background: transparent;
+            border: 1px solid var(--primary);
+            color: var(--primary);
+        }
+
+        .button.ghost:hover {
+            background: var(--primary);
+            color: white;
+        }
+
         .button-group {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
-            margin-bottom: 20px;
+            gap: 12px;
+            margin-bottom: 24px;
         }
-        
+
         .location-selector {
             display: flex;
-            gap: 10px;
-            align-items: center;
+            gap: 12px;
+            align-items: stretch;
         }
-        
+
+        .location-selector .input {
+            flex: 1;
+        }
+
+        .location-selector .button {
+            margin: 0;
+        }
+
         .progress-container {
-            margin-bottom: 20px;
+            margin-bottom: 24px;
             display: none;
         }
-        
+
+        .progress-wrapper {
+            background: rgba(0, 0, 0, 0.05);
+            border-radius: 8px;
+            padding: 4px;
+        }
+
         .progress-bar {
-            width: 100%;
-            height: 12px;
-            background: #e0e0e0;
+            height: 10px;
+            background: rgba(0, 0, 0, 0.1);
             border-radius: 6px;
             overflow: hidden;
         }
-        
+
         .progress-fill {
             height: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--primary);
             transition: width 0.3s ease;
             width: 0%;
         }
-        
+
+        .progress-text {
+            text-align: center;
+            margin-top: 8px;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
         .status {
-            margin-top: 10px;
-            padding: 15px;
-            border-radius: 10px;
-            background: rgba(102, 126, 234, 0.1);
-            color: #333;
+            margin-top: 16px;
+            padding: 16px;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.05);
+            color: var(--text-primary);
             text-align: center;
             display: none;
+            font-size: 0.95rem;
         }
-        
-        .success {
-            background: rgba(39, 174, 96, 0.1);
-            color: #27ae60;
-            border: 1px solid rgba(39, 174, 96, 0.3);
+
+        .status.success {
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--success);
         }
-        
-        .error {
-            background: rgba(231, 76, 60, 0.1);
-            color: #e74c3c;
-            border: 1px solid rgba(231, 76, 60, 0.3);
+
+        .status.error {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
         }
-        
+
+        .status.info {
+            background: rgba(59, 130, 246, 0.1);
+            color: #3b82f6;
+        }
+
         .download-actions {
-            margin-top: 20px;
-            text-align: center;
+            margin-top: 24px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            justify-content: center;
         }
-        
+
         .download-link {
-            display: inline-block;
-            margin: 5px;
-            padding: 12px 25px;
-            background: #27ae60;
+            padding: 12px 24px;
+            background: var(--success);
             color: white;
             text-decoration: none;
             border-radius: 8px;
-            font-weight: bold;
+            font-weight: 500;
             transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
-        
+
         .download-link:hover {
-            background: #2ecc71;
-            transform: translateY(-1px);
+            background: #16a34a;
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
         }
-        
+
         .preview-section {
-            margin-top: 30px;
-            padding: 20px;
-            background: rgba(52, 73, 94, 0.1);
-            border-radius: 10px;
+            margin-top: 32px;
+            padding: 24px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 12px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
             display: none;
         }
-        
-        .websites-list {
-            margin-top: 20px;
+
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
-        
+
+        .section-title i {
+            color: var(--primary);
+        }
+
+        .websites-list {
+            margin-top: 16px;
+        }
+
         .website-item {
-            background: rgba(255, 255, 255, 0.8);
-            padding: 15px;
-            margin: 10px 0;
+            background: white;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin: 12px 0;
             border-radius: 8px;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            transition: all 0.3s ease;
         }
-        
+
+        .website-item:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
         .website-info {
             flex: 1;
         }
-        
+
         .website-domain {
-            font-weight: bold;
+            font-weight: 600;
             font-size: 1.1rem;
-            color: #333;
+            color: var(--primary);
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
-        
+
+        .website-status {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-indicator.online {
+            background: var(--success);
+        }
+
+        .status-indicator.offline {
+            background: #94a3b8;
+        }
+
         .website-actions {
             display: flex;
-            gap: 10px;
+            gap: 8px;
         }
-        
+
         .small-button {
-            padding: 8px 15px;
+            padding: 8px 16px;
             font-size: 0.9rem;
         }
-        
-        .emoji {
-            font-size: 1.2rem;
-            margin-right: 8px;
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
         }
-        
-        .info-box {
-            background: rgba(52, 152, 219, 0.1);
-            border: 1px solid rgba(52, 152, 219, 0.3);
-            padding: 15px;
+
+        .empty-state i {
+            font-size: 3rem;
+            color: #94a3b8;
+            margin-bottom: 12px;
+            display: block;
+        }
+
+        .empty-state h3 {
+            font-size: 1.1rem;
+            margin-bottom: 8px;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin: 32px 0;
+        }
+
+        .feature-card {
+            background: white;
+            border: 1px solid rgba(0, 0, 0, 0.1);
             border-radius: 8px;
-            margin-bottom: 20px;
-            color: #2c3e50;
+            padding: 20px;
+            text-align: center;
+            transition: all 0.3s ease;
         }
-        
-        @media (max-width: 600px) {
-            .container {
+
+        .feature-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .feature-icon {
+            font-size: 2rem;
+            color: var(--primary);
+            margin-bottom: 12px;
+        }
+
+        .feature-title {
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 8px;
+        }
+
+        .feature-desc {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        @media (max-width: 768px) {
+            body {
                 padding: 20px;
             }
-            
+
+            .container {
+                padding: 24px;
+            }
+
             .title {
                 font-size: 2rem;
             }
-            
+
             .location-selector {
                 flex-direction: column;
             }
-            
+
             .button-group {
                 justify-content: center;
             }
-            
+
             .website-item {
                 flex-direction: column;
-                gap: 10px;
+                gap: 16px;
+                text-align: center;
             }
+
+            .website-actions {
+                justify-content: center;
+            }
+
+            .download-actions {
+                flex-direction: column;
+            }
+
+            .feature-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 16px;
+            }
+
+            .title {
+                font-size: 1.75rem;
+            }
+
+            .button {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .location-selector .button {
+                width: auto;
+            }
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--primary);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--primary-dark);
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1 class="title">🌐 Web Cloner</h1>
-        <p style="text-align: center; color: #666; margin-bottom: 30px;">
-            Professional Website Downloader - Clone any website with all assets
-        </p>
-        
-        <div class="info-box">
-            <strong>💡 How to use:</strong><br>
-            1. Choose where to save your cloned websites<br>
-            2. Enter the website URL you want to clone<br>
-            3. Click "Clone Website" and wait for completion<br>
-            4. Use "Preview" to view the cloned website locally
+        <div class="header">
+            <div class="logo">
+                <i class="fas fa-globe"></i>
+            </div>
+            <h1 class="title">Web Cloner Pro</h1>
+            <p class="subtitle">Effortlessly clone websites with all assets</p>
         </div>
-        
-        <form id="cloneForm">
+
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-download"></i>
+                </div>
+                <div class="feature-title">Full Asset Downloads</div>
+                <div class="feature-desc">Capture HTML, CSS, JS, and images</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-eye"></i>
+                </div>
+                <div class="feature-title">Live Preview</div>
+                <div class="feature-desc">View cloned sites instantly</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-archive"></i>
+                </div>
+                <div class="feature-title">ZIP Archives</div>
+                <div class="feature-desc">Download sites as ZIP files</div>
+            </div>
+        </div>
+
+        <form id="cloneForm" class="form-section">
             <div class="input-group">
-                <label class="label" for="downloadLocation">📁 Download Location:</label>
+                <label class="label" for="downloadLocation">
+                    <i class="fas fa-folder"></i>
+                    Download Location
+                </label>
                 <div class="location-selector">
                     <input 
                         type="text" 
                         id="downloadLocation" 
                         class="input" 
-                        placeholder="Choose folder to save cloned websites..."
+                        placeholder="Select a folder to save websites..."
                         readonly
                     >
                     <button type="button" class="button secondary" onclick="chooseDownloadLocation()">
-                        <span class="emoji">📂</span>Browse
+                        <i class="fas fa-folder-open"></i>
+                        Browse
                     </button>
                 </div>
             </div>
-            
+
             <div class="input-group">
-                <label class="label" for="url">🌐 Website URL:</label>
+                <label class="label" for="url">
+                    <i class="fas fa-link"></i>
+                    Website URL
+                </label>
                 <input 
                     type="url" 
                     id="url" 
@@ -836,29 +1205,41 @@ def create_templates():
                     required
                 >
             </div>
-            
+
             <div class="button-group">
                 <button type="submit" class="button" id="cloneBtn">
-                    <span class="emoji">🚀</span>Clone Website
+                    <i class="fas fa-rocket"></i>
+                    Clone Website
                 </button>
-                <button type="button" class="button secondary" onclick="showPreviewSection()">
-                    <span class="emoji">👁️</span>Show Cloned Websites
+                <button type="button" class="button ghost" onclick="showPreviewSection()">
+                    <i class="fas fa-list"></i>
+                    View Cloned Websites
                 </button>
             </div>
         </form>
-        
+
         <div class="progress-container" id="progressContainer">
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill"></div>
+            <div class="progress-wrapper">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
             </div>
+            <div class="progress-text" id="progressText">Initializing...</div>
         </div>
-        
+
         <div class="status" id="status"></div>
-        
+
         <div class="preview-section" id="previewSection">
-            <h3 style="color: #333; margin-bottom: 15px;">📚 Your Cloned Websites</h3>
+            <h3 class="section-title">
+                <i class="fas fa-server"></i>
+                Cloned Websites
+            </h3>
             <div class="websites-list" id="websitesList">
-                <p style="text-align: center; color: #666;">Loading...</p>
+                <div class="empty-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <h3>Loading...</h3>
+                    <p>Fetching your cloned websites</p>
+                </div>
             </div>
         </div>
     </div>
@@ -871,6 +1252,7 @@ def create_templates():
         const cloneBtn = document.getElementById('cloneBtn');
         const progressContainer = document.getElementById('progressContainer');
         const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
         const status = document.getElementById('status');
         const previewSection = document.getElementById('previewSection');
         const websitesList = document.getElementById('websitesList');
@@ -882,11 +1264,10 @@ def create_templates():
             const defaultLocation = './cloned_websites';
             locationInput.value = defaultLocation;
             currentDownloadLocation = defaultLocation;
+            console.log('Default download location set:', defaultLocation);
         });
         
         function chooseDownloadLocation() {
-            // For web interface, we'll use a simple prompt
-            // In a real implementation, you might use a file picker API
             const location = prompt('Enter the full path where you want to save cloned websites:', currentDownloadLocation || './cloned_websites');
             if (location) {
                 fetch('/api/set_download_location', {
@@ -902,37 +1283,61 @@ def create_templates():
                         locationInput.value = location;
                         currentDownloadLocation = location;
                         showStatus('Download location set successfully!', 'success');
+                        console.log('Download location updated:', location);
                     } else {
                         showStatus('Error setting download location: ' + data.error, 'error');
+                        console.error('Error setting download location:', data.error);
                     }
                 })
                 .catch(error => {
                     showStatus('Error: ' + error.message, 'error');
+                    console.error('Error in chooseDownloadLocation:', error);
                 });
             }
         }
         
         function showPreviewSection() {
-            previewSection.style.display = previewSection.style.display === 'none' ? 'block' : 'none';
-            if (previewSection.style.display === 'block') {
+            const isVisible = previewSection.style.display === 'block';
+            previewSection.style.display = isVisible ? 'none' : 'block';
+            if (!isVisible) {
                 loadClonedWebsites();
             }
         }
         
         function loadClonedWebsites() {
-            websitesList.innerHTML = '<p style="text-align: center; color: #666;">Loading...</p>';
+            websitesList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <h3>Loading...</h3>
+                    <p>Fetching your cloned websites</p>
+                </div>
+            `;
             
             fetch('/api/get_cloned_websites')
                 .then(response => response.json())
                 .then(data => {
+                    console.log('Cloned websites data:', data);
                     if (data.websites && data.websites.length > 0) {
                         displayWebsites(data.websites);
                     } else {
-                        websitesList.innerHTML = '<p style="text-align: center; color: #666;">No cloned websites found. Clone a website first!</p>';
+                        websitesList.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-globe"></i>
+                                <h3>No websites cloned yet</h3>
+                                <p>Clone your first website to get started!</p>
+                            </div>
+                        `;
                     }
                 })
                 .catch(error => {
-                    websitesList.innerHTML = '<p style="text-align: center; color: #e74c3c;">Error loading websites: ' + error.message + '</p>';
+                    websitesList.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <h3>Error loading websites</h3>
+                            <p>${error.message}</p>
+                        </div>
+                    `;
+                    console.error('Error loading cloned websites:', error);
                 });
         }
         
@@ -945,12 +1350,19 @@ def create_templates():
                 
                 websiteDiv.innerHTML = `
                     <div class="website-info">
-                        <div class="website-domain">🌐 ${website.domain}</div>
-                        <small style="color: #666;">Status: ${website.has_preview ? '🟢 Preview Running' : '⚪ Ready to Preview'}</small>
+                        <div class="website-domain">
+                            <i class="fas fa-globe"></i>
+                            ${website.domain}
+                        </div>
+                        <div class="website-status">
+                            <span class="status-indicator ${website.has_preview ? 'online' : 'offline'}"></span>
+                            ${website.has_preview ? 'Preview Running' : 'Ready to Preview'}
+                        </div>
                     </div>
                     <div class="website-actions">
                         <button class="button success small-button" onclick="previewWebsite('${website.domain}')">
-                            <span class="emoji">👁️</span>Preview
+                            <i class="fas fa-eye"></i>
+                            Preview
                         </button>
                     </div>
                 `;
@@ -961,25 +1373,52 @@ def create_templates():
         
         function previewWebsite(domain) {
             showStatus(`Starting preview server for ${domain}...`, 'info');
+            console.log(`Attempting to preview website: ${domain}`);
             
             fetch(`/api/preview/${domain}`)
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
+                    console.log('Preview response:', data);
                     if (data.success) {
-                        // Open preview in new window/tab
-                        window.open(data.preview_url, '_blank');
-                        showStatus(`Preview started! Opening ${domain} at ${data.preview_url}`, 'success');
+                        // Attempt to open preview URL with retry mechanism
+                        const previewUrl = data.preview_url;
+                        let retryCount = 0;
+                        const maxRetries = 3;
                         
-                        // Refresh the websites list to update status
-                        setTimeout(() => {
-                            loadClonedWebsites();
-                        }, 1000);
+                        function tryOpenPreview() {
+                            console.log(`Opening preview URL: ${previewUrl} (Attempt ${retryCount + 1})`);
+                            const newWindow = window.open(previewUrl, '_blank');
+                            if (!newWindow) {
+                                console.warn('Popup blocked or failed to open');
+                                if (retryCount < maxRetries) {
+                                    retryCount++;
+                                    setTimeout(tryOpenPreview, 1000); // Retry after 1 second
+                                } else {
+                                    showStatus('Error: Could not open preview. Please allow popups or open the URL manually: ' + previewUrl, 'error');
+                                }
+                            } else {
+                                showStatus(`Preview started for ${domain} at ${previewUrl}`, 'success');
+                                // Refresh websites list
+                                setTimeout(() => {
+                                    loadClonedWebsites();
+                                }, 1000);
+                            }
+                        }
+                        
+                        tryOpenPreview();
                     } else {
                         showStatus('Error starting preview: ' + data.error, 'error');
+                        console.error('Preview error:', data.error);
                     }
                 })
                 .catch(error => {
                     showStatus('Error: ' + error.message, 'error');
+                    console.error('Error in previewWebsite:', error);
                 });
         }
         
@@ -987,6 +1426,27 @@ def create_templates():
             status.innerHTML = message;
             status.className = `status ${type}`;
             status.style.display = 'block';
+            
+            // Auto hide after 5 seconds for non-error messages
+            if (type !== 'error') {
+                setTimeout(() => {
+                    status.style.display = 'none';
+                }, 5000);
+            }
+        }
+        
+        function resetForm() {
+            try {
+                console.log('Resetting form');
+                cloneBtn.disabled = false;
+                cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
+                progressFill.style.width = '0%';
+                progressContainer.style.display = 'none';
+                progressText.textContent = 'Initializing...';
+            } catch (error) {
+                console.error('Error in resetForm:', error);
+                showStatus('Error resetting form: ' + error.message, 'error');
+            }
         }
         
         form.addEventListener('submit', (e) => {
@@ -997,20 +1457,25 @@ def create_templates():
             
             if (!url) {
                 showStatus('Please enter a website URL', 'error');
+                console.error('No URL provided');
                 return;
             }
             
             if (!downloadLocation) {
                 showStatus('Please choose a download location', 'error');
+                console.error('No download location provided');
                 return;
             }
             
             // Reset UI
             cloneBtn.disabled = true;
-            cloneBtn.innerHTML = '<span class="emoji">⏳</span>Cloning...';
+            cloneBtn.innerHTML = '<span class="loading-spinner"></span> Cloning...';
             progressContainer.style.display = 'block';
-            showStatus('Initializing...', 'info');
+            showStatus('Initializing cloning process...', 'info');
             progressFill.style.width = '0%';
+            progressText.textContent = 'Initializing...';
+            
+            console.log('Starting clone process for URL:', url, 'Location:', downloadLocation);
             
             // Start cloning
             socket.emit('clone_website', { 
@@ -1023,22 +1488,29 @@ def create_templates():
             showStatus(data.message, 'info');
             if (data.progress !== undefined) {
                 progressFill.style.width = data.progress + '%';
+                progressText.textContent = `${data.message} (${data.progress}%)`;
             }
+            console.log('Status update:', data);
         });
         
         socket.on('clone_complete', (data) => {
-            showStatus(`✅ Website cloned successfully!`, 'success');
+            console.log('Clone complete:', data);
+            showStatus(`Website cloned successfully!`, 'success');
+            progressText.textContent = 'Completed successfully!';
             
             const actionsHtml = `
                 <div class="download-actions">
                     <a href="${data.download_url}" class="download-link">
-                        <span class="emoji">📥</span>Download ZIP Archive
+                        <i class="fas fa-download"></i>
+                        Download ZIP Archive
                     </a>
                     <button class="button success" onclick="previewWebsite('${data.domain}')">
-                        <span class="emoji">👁️</span>Preview Website
+                        <i class="fas fa-eye"></i>
+                        Preview Website
                     </button>
-                    <button class="button secondary" onclick="showPreviewSection()">
-                        <span class="emoji">📚</span>Show All Websites
+                    <button class="button ghost" onclick="showPreviewSection()">
+                        <i class="fas fa-list"></i>
+                        Show All Websites
                     </button>
                 </div>
             `;
@@ -1052,23 +1524,47 @@ def create_templates():
                     loadClonedWebsites();
                 }, 1000);
             }
+            
+            // Ensure button resets even if there's a delay
+            setTimeout(() => {
+                if (cloneBtn.disabled) {
+                    console.warn('Forcing form reset due to timeout');
+                    resetForm();
+                }
+            }, 2000);
         });
         
         socket.on('clone_error', (data) => {
-            showStatus(`❌ Error: ${data.error}`, 'error');
+            console.error('Clone error:', data);
+            showStatus(`Error: ${data.error}`, 'error');
+            progressText.textContent = 'Error occurred';
             resetForm();
         });
-        
-        function resetForm() {
-            cloneBtn.disabled = false;
-            cloneBtn.innerHTML = '<span class="emoji">🚀</span>Clone Website';
-            progressFill.style.width = '100%';
-        }
         
         // Auto-load websites on page load if section is visible
         window.addEventListener('load', () => {
             if (previewSection.style.display === 'block') {
                 loadClonedWebsites();
+            }
+        });
+
+        // Add URL validation
+        urlInput.addEventListener('input', function() {
+            const url = this.value.trim();
+            if (url && !url.match(/^https?:\/\//)) {
+                this.style.borderColor = 'var(--warning)';
+            } else {
+                this.style.borderColor = 'var(--gray-200)';
+            }
+        });
+
+        // Add keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            // Ctrl/Cmd + Enter to submit form
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                if (!cloneBtn.disabled) {
+                    form.dispatchEvent(new Event('submit'));
+                }
             }
         });
     </script>
@@ -1087,13 +1583,16 @@ if __name__ == '__main__':
     os.makedirs(default_output, exist_ok=True)
     
     print("=" * 60)
-    print("🌐 Web Cloner Server - Enhanced Version")
+    print("🌐 Web Cloner Pro - Enhanced Version")
     print("=" * 60)
     print("🚀 Features:")
+    print("   • Modern, attractive UI with professional design")
     print("   • Choose custom download location")
     print("   • Preview cloned websites locally")
     print("   • Download ZIP archives")
     print("   • Manage multiple cloned sites")
+    print("   • Real-time progress tracking")
+    print("   • Responsive design for all devices")
     print()
     print("📱 Web Interface: http://localhost:5000")
     print("📁 Default Download Location:", default_output)
