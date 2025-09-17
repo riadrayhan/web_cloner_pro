@@ -12,3 +12,5 @@ gunicorn>=20.1.0
 redis==5.0.1
 eventlet==0.33.3
 Flask-Session>=0.4.0
+fake-useragent>=1.5.1
+cloudscraper>=1.2.71
