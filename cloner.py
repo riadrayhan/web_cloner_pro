@@ -19,30 +19,17 @@ from pathlib import Path
 import zipfile
 import shutil
 import json
-import logging
-
-# Suppress logging for engineio, socketio, and werkzeug to hide "Invalid session" errors
-logging.getLogger('engineio').setLevel(logging.ERROR)
-logging.getLogger('socketio').setLevel(logging.ERROR)
-logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'web_cloner_secret_key')
-
-# Configure SocketIO - Use "*" for CORS to allow Render domain
-socketio = SocketIO(
-    app,
-    cors_allowed_origins="*",
-    async_mode='threading',  # Use threading for single worker compatibility without eventlet
-    engineio_logger=False
-)
+app.config['SECRET_KEY'] = 'web_cloner_secret_key'
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Global variables for server management
 preview_servers = {}  # Store multiple preview servers
 current_preview_port = 9000
 
 class WebClonerCore:
-    """Core web cloning functionality"""
+    """Core web cloning functionality - your existing logic with enhancements"""
     
     def __init__(self, socketio_instance=None):
         self.socketio = socketio_instance
@@ -62,42 +49,71 @@ class WebClonerCore:
         print(f"Status: {message} ({progress}%)" if progress else f"Status: {message}")
     
     def clone_website(self, url, output_base_dir):
-        """Main cloning function"""
+        """Main cloning function - your existing logic"""
         try:
             self.emit_status("Starting website cloning...", 0)
+            
+            # Parse URL and create output directory
             parsed_url = urlparse(url)
             domain = parsed_url.netloc.replace(':', '_')
             output_dir = os.path.join(output_base_dir, domain)
+            
+            # Create output directory
             os.makedirs(output_dir, exist_ok=True)
+            
+            # Create assets directory
             assets_dir = os.path.join(output_dir, 'assets')
             os.makedirs(assets_dir, exist_ok=True)
+            
             self.emit_status(f"Downloading main page from {url}...", 10)
+            
+            # Download main page
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
+            
             self.emit_status("Parsing HTML content...", 20)
+            
+            # Parse HTML
             soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Process and download resources
             self.emit_status("Processing images and resources...", 30)
+            
+            # Download images
             self.process_images(soup, url, assets_dir)
             self.emit_status("Images processed", 50)
+            
+            # Download CSS files
             self.emit_status("Processing CSS files...", 60)
             self.process_css_files(soup, url, assets_dir)
+            
+            # Download JavaScript files
             self.emit_status("Processing JavaScript files...", 70)
             self.process_js_files(soup, url, assets_dir)
+            
+            # Process internal links
             self.emit_status("Processing internal links...", 80)
             self.process_internal_links(soup, url, output_dir)
+            
+            # Save main HTML file
             self.emit_status("Saving HTML file...", 90)
             html_file = os.path.join(output_dir, 'index.html')
             with open(html_file, 'w', encoding='utf-8') as f:
                 f.write(str(soup))
+            
+            # Create ZIP file
             self.emit_status("Creating downloadable archive...", 95)
             zip_path = self.create_zip_archive(output_dir)
+            
             self.emit_status(f"Website cloned successfully!", 100)
+            
             return {
                 'success': True,
                 'output_dir': output_dir,
                 'zip_path': zip_path,
                 'domain': domain
             }
+            
         except Exception as e:
             self.emit_status(f"Error: {str(e)}", 0)
             return {
@@ -109,17 +125,21 @@ class WebClonerCore:
         """Create ZIP archive of cloned website"""
         zip_name = f"{os.path.basename(source_dir)}_cloned.zip"
         zip_path = os.path.join(os.path.dirname(source_dir), zip_name)
+        
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for root, dirs, files in os.walk(source_dir):
                 for file in files:
                     file_path = os.path.join(root, file)
                     arc_name = os.path.relpath(file_path, source_dir)
                     zipf.write(file_path, arc_name)
+        
         return zip_path
     
+    # Your existing methods (process_images, process_css_files, etc.)
     def process_images(self, soup, base_url, assets_dir):
         """Download and process all images"""
         img_tags = soup.find_all(['img', 'source'])
+        
         for i, tag in enumerate(img_tags):
             try:
                 img_url = None
@@ -129,19 +149,23 @@ class WebClonerCore:
                     img_url = tag['data-src']
                 elif tag.get('data-lazy-src'):
                     img_url = tag['data-lazy-src']
+                
                 if img_url:
                     if tag.get('srcset'):
                         srcset_urls = self.parse_srcset(tag['srcset'])
                         for srcset_url in srcset_urls:
                             self.download_resource(srcset_url, base_url, assets_dir)
+                    
                     local_path = self.download_resource(img_url, base_url, assets_dir)
                     if local_path:
                         tag['src'] = local_path
                         for attr in ['data-src', 'data-lazy-src', 'loading']:
                             if tag.get(attr):
                                 del tag[attr]
+                
             except Exception as e:
                 print(f"Error processing image {i}: {e}")
+        
         self.process_css_background_images(soup, base_url, assets_dir)
     
     def parse_srcset(self, srcset):
@@ -163,6 +187,7 @@ class WebClonerCore:
                 local_path = self.download_resource(url, base_url, assets_dir)
                 if local_path:
                     tag['style'] = style.replace(url, local_path)
+        
         for style_tag in soup.find_all('style'):
             if style_tag.string:
                 css_content = style_tag.string
@@ -196,10 +221,12 @@ class WebClonerCore:
     def process_internal_links(self, soup, base_url, output_dir):
         """Process internal page links"""
         base_domain = urlparse(base_url).netloc
+        
         for link in soup.find_all('a', href=True):
             href = link['href']
             full_url = urljoin(base_url, href)
             link_domain = urlparse(full_url).netloc
+            
             if link_domain == base_domain:
                 try:
                     response = self.session.get(full_url, timeout=15)
@@ -213,13 +240,17 @@ class WebClonerCore:
                             if not filename.endswith('.html'):
                                 filename += '.html'
                             local_dir = os.path.join(output_dir, os.path.dirname(path).strip('/'))
+                        
                         if local_dir != output_dir:
                             os.makedirs(local_dir, exist_ok=True)
+                        
                         file_path = os.path.join(local_dir, filename)
                         with open(file_path, 'w', encoding='utf-8') as f:
                             f.write(response.text)
+                        
                         rel_path = os.path.relpath(file_path, output_dir).replace('\\', '/')
                         link['href'] = rel_path
+                        
                 except Exception as e:
                     print(f"Error downloading internal page {full_url}: {e}")
     
@@ -228,13 +259,18 @@ class WebClonerCore:
         try:
             if url.startswith('data:'):
                 return self.save_data_uri(url, assets_dir)
+            
             full_url = urljoin(base_url, url)
+            
             if full_url in self.downloaded_resources:
                 return self.get_local_path(full_url, assets_dir)
+            
             response = self.session.get(full_url, timeout=15)
             response.raise_for_status()
+            
             parsed_url = urlparse(full_url)
             filename = os.path.basename(parsed_url.path) or 'resource'
+            
             if '.' not in filename:
                 content_type = response.headers.get('content-type', '')
                 if 'image' in content_type:
@@ -244,17 +280,21 @@ class WebClonerCore:
                     filename += '.css'
                 elif 'javascript' in content_type:
                     filename += '.js'
+            
             counter = 1
             original_filename = filename
             while os.path.exists(os.path.join(assets_dir, filename)):
                 name, ext = os.path.splitext(original_filename)
                 filename = f"{name}_{counter}{ext}"
                 counter += 1
+            
             file_path = os.path.join(assets_dir, filename)
             with open(file_path, 'wb') as f:
                 f.write(response.content)
+            
             self.downloaded_resources.add(full_url)
             return f"assets/{filename}"
+            
         except Exception as e:
             print(f"Error downloading resource {url}: {e}")
             return None
@@ -264,13 +304,17 @@ class WebClonerCore:
         try:
             header, data = data_uri.split(',', 1)
             mime_type = header.split(';')[0].split(':')[1]
+            
             ext = mimetypes.guess_extension(mime_type) or '.bin'
             filename = f"data_uri_{len(self.downloaded_resources)}{ext}"
+            
             file_data = base64.b64decode(data)
             file_path = os.path.join(assets_dir, filename)
             with open(file_path, 'wb') as f:
                 f.write(file_data)
+            
             return f"assets/{filename}"
+            
         except Exception as e:
             print(f"Error saving data URI: {e}")
             return None
@@ -280,7 +324,7 @@ class WebClonerCore:
         filename = os.path.basename(urlparse(url).path) or 'resource'
         return f"assets/{filename}"
 
-# Preview server management (only for local, disabled on Render)
+# Preview server management
 def find_available_port(start_port=9000):
     """Find an available port for preview server"""
     for port in range(start_port, start_port + 100):
@@ -293,47 +337,47 @@ def find_available_port(start_port=9000):
     return None
 
 def start_preview_server(folder_path, domain):
-    """Start preview server for a cloned website - only local"""
-    if os.environ.get('RENDER'):
-        return None
+    """Start preview server for a cloned website"""
     global preview_servers, current_preview_port
-    if domain in preview_servers:
-        stop_preview_server(domain)
+    
+    # Find available port
     port = find_available_port(current_preview_port)
     if port is None:
-        print(f"Error: No available port found for preview server (domain: {domain})")
         return None
+    
     current_preview_port = port + 1
+    
+    # Create custom handler
     class CustomHandler(http.server.SimpleHTTPRequestHandler):
         def end_headers(self):
             self.send_header('Cache-Control', 'no-cache')
-            self.send_header('Access-Control-Allow-Origin', '*')
             super().end_headers()
+        
         def do_GET(self):
             if self.path == '/' or self.path == '':
                 self.path = '/index.html'
             elif self.path.endswith('/'):
                 self.path += 'index.html'
+            
             if '.' not in os.path.basename(self.path):
-                if os.path.exists(os.path.join(folder_path, self.path.lstrip('/') + '.html')):
+                if os.path.exists(self.path.lstrip('/') + '.html'):
                     self.path += '.html'
-                elif os.path.exists(os.path.join(folder_path, self.path.lstrip('/') + '/index.html')):
+                elif os.path.exists(self.path.lstrip('/') + '/index.html'):
                     self.path += '/index.html'
+            
             try:
-                print(f"Serving file: {self.path} for domain: {domain}")
                 return super().do_GET()
-            except Exception as e:
-                print(f"Error serving file {self.path}: {e}")
-                self.send_error(404, f"File not found: {self.path}")
+            except Exception:
+                self.send_error(404, "File not found")
+        
         def log_message(self, format, *args):
-            print(f"Preview server request for {domain}: {format % args}")
+            pass
+    
     def run_server():
         original_dir = os.getcwd()
         try:
             os.chdir(folder_path)
-            print(f"Starting preview server for {domain} on port {port} at path {folder_path}")
             with socketserver.TCPServer(("localhost", port), CustomHandler) as httpd:
-                httpd.allow_reuse_address = True
                 preview_servers[domain] = {'httpd': httpd, 'port': port, 'thread': None}
                 httpd.serve_forever()
         except Exception as e:
@@ -342,34 +386,13 @@ def start_preview_server(folder_path, domain):
             os.chdir(original_dir)
             if domain in preview_servers:
                 del preview_servers[domain]
+    
+    # Start server thread
     server_thread = Thread(target=run_server, daemon=True)
     server_thread.start()
     preview_servers[domain] = {'port': port, 'thread': server_thread}
-    time.sleep(2)
-    try:
-        response = requests.get(f"http://localhost:{port}/index.html", timeout=10)
-        if response.status_code == 200:
-            print(f"Preview server for {domain} started successfully on port {port}")
-            return port
-        else:
-            print(f"Preview server for {domain} failed to serve index.html (status: {response.status_code})")
-            return None
-    except Exception as e:
-        print(f"Error verifying preview server for {domain}: {e}")
-        return None
-
-def stop_preview_server(domain):
-    """Stop preview server for a domain"""
-    if domain in preview_servers:
-        try:
-            server_info = preview_servers[domain]
-            if 'httpd' in server_info and server_info['httpd']:
-                server_info['httpd'].shutdown()
-                server_info['httpd'].server_close()
-            del preview_servers[domain]
-            print(f"Stopped preview server for {domain}")
-        except Exception as e:
-            print(f"Error stopping preview server for {domain}: {e}")
+    
+    return port
 
 # Flask routes
 @app.route('/')
@@ -391,9 +414,13 @@ def set_download_location():
     try:
         data = request.get_json()
         location = data.get('location', '')
+        
         if not location:
             return jsonify({'error': 'No location provided'}), 400
+        
+        # Create directory if it doesn't exist
         os.makedirs(location, exist_ok=True)
+        
         return jsonify({'success': True, 'location': location})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -405,18 +432,19 @@ def get_cloned_websites():
         downloads_dir = os.path.join(os.getcwd(), 'cloned_websites')
         if not os.path.exists(downloads_dir):
             return jsonify({'websites': []})
+        
         websites = []
         for item in os.listdir(downloads_dir):
             item_path = os.path.join(downloads_dir, item)
             if os.path.isdir(item_path):
                 index_path = os.path.join(item_path, 'index.html')
                 if os.path.exists(index_path):
-                    has_preview = item in preview_servers if not os.environ.get('RENDER') else False
                     websites.append({
                         'domain': item,
                         'path': item_path,
-                        'has_preview': has_preview
+                        'has_preview': item in preview_servers
                     })
+        
         return jsonify({'websites': websites})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -427,82 +455,57 @@ def preview_website(domain):
     try:
         downloads_dir = os.path.join(os.getcwd(), 'cloned_websites')
         website_path = os.path.join(downloads_dir, domain)
+        
         if not os.path.exists(website_path):
             return jsonify({'error': 'Website not found'}), 404
+        
         index_path = os.path.join(website_path, 'index.html')
         if not os.path.exists(index_path):
             return jsonify({'error': 'No index.html found'}), 404
         
-        if os.environ.get('RENDER'):
-            # On Render, use Flask-served preview URL
-            preview_url = f"/preview/{domain}"
+        # Start preview server
+        if domain in preview_servers:
+            port = preview_servers[domain]['port']
         else:
-            # Local: Use port-based server
-            if domain in preview_servers:
-                port = preview_servers[domain]['port']
-            else:
-                port = start_preview_server(website_path, domain)
-                if port is None:
-                    return jsonify({'error': 'Could not start preview server'}), 500
-            preview_url = f"http://localhost:{port}"
+            port = start_preview_server(website_path, domain)
+            if port is None:
+                return jsonify({'error': 'Could not start preview server'}), 500
         
+        preview_url = f"http://localhost:{port}"
         return jsonify({
             'success': True,
             'preview_url': preview_url,
-            'domain': domain
+            'domain': domain,
+            'port': port
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/stop_preview/<domain>')
-def stop_preview(domain):
-    """Stop preview for a cloned website"""
-    try:
-        if not os.environ.get('RENDER'):
-            stop_preview_server(domain)
-        return jsonify({'success': True, 'message': f'Preview stopped for {domain}'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/preview/<domain>/<path:path>')
-def serve_preview(domain, path):
-    """Serve preview files directly - for Render"""
-    try:
-        downloads_dir = os.path.join(os.getcwd(), 'cloned_websites')
-        website_path = os.path.join(downloads_dir, domain)
-        if not os.path.exists(website_path):
-            return send_from_directory(website_path, 'index.html', mimetype='text/html')
-        return send_from_directory(website_path, path or 'index.html')
-    except Exception as e:
-        return jsonify({'error': str(e)}), 404
-
 # SocketIO events
-@socketio.on('connect')
-def handle_connect():
-    print(f"Client connected: {request.sid}")
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    print(f"Client disconnected: {request.sid}")
-
 @socketio.on('clone_website')
 def handle_clone_request(data):
     """Handle website cloning request"""
     def clone_task():
         url = data.get('url')
         download_location = data.get('downloadLocation', os.path.join(os.getcwd(), 'cloned_websites'))
+        
         if not url:
             emit('clone_error', {'error': 'No URL provided'})
             return
+        
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url
+        
+        # Create download directory
         try:
             os.makedirs(download_location, exist_ok=True)
         except Exception as e:
             emit('clone_error', {'error': f'Cannot create download directory: {str(e)}'})
             return
+        
         cloner = WebClonerCore(socketio)
         result = cloner.clone_website(url, download_location)
+        
         if result['success']:
             zip_filename = os.path.basename(result['zip_path'])
             emit('clone_complete', {
@@ -512,6 +515,8 @@ def handle_clone_request(data):
             })
         else:
             emit('clone_error', {'error': result['error']})
+    
+    # Run in separate thread
     thread = Thread(target=clone_task)
     thread.daemon = True
     thread.start()
@@ -522,697 +527,307 @@ def create_templates():
     templates_dir = 'templates'
     os.makedirs(templates_dir, exist_ok=True)
     
+    # Enhanced main template with preview and download location features
     html_content = '''<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Cloner Pro - Professional Website Downloader</title>
+    <title>Web Cloner - Professional Website Downloader</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.0/socket.io.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
-        :root {
-            --primary: #1e3a8a; /* Deep Indigo */
-            --primary-dark: #1e293b;
-            --secondary: #facc15; /* Gold Accent */
-            --secondary-dark: #ca8a04;
-            --background: #f8fafc;
-            --card-bg: rgba(255, 255, 255, 0.95);
-            --text-primary: #1e293b;
-            --text-secondary: #475569;
-            --success: #22c55e;
-            --danger: #ef4444;
-            --warning: #f59e0b;
-            --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
-            --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.15);
-            --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.2);
-            --ring: 0 0 0 3px rgba(30, 58, 138, 0.2);
-        }
-
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-
+        
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--background);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            padding: 40px;
-            font-size: 16px;
-            line-height: 1.6;
-            color: var(--text-primary);
-            position: relative;
-            overflow-x: hidden;
+            padding: 20px;
         }
-
-        body::before {
-            content: '';
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(135deg, rgba(30, 58, 138, 0.05) 0%, rgba(250, 204, 21, 0.05) 100%);
-            z-index: -1;
-        }
-
+        
         .container {
-            max-width: 1000px;
-            margin: 0 auto;
-            background: var(--card-bg);
-            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
             padding: 40px;
-            box-shadow: var(--shadow-lg);
-            position: relative;
-            z-index: 1;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            max-width: 800px;
+            margin: 0 auto;
         }
-
-        .container:hover {
-            transform: translateY(-4px);
-            box-shadow: var(--shadow-lg);
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-        }
-
+        
         .title {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
             font-size: 2.5rem;
-            font-weight: 700;
-            color: var(--primary);
-            letter-spacing: -0.025em;
-            margin-bottom: 12px;
+            font-weight: bold;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
-
-        .subtitle {
-            font-size: 1.1rem;
-            color: var(--text-secondary);
-            font-weight: 400;
-        }
-
-        .logo {
-            font-size: 3rem;
-            color: var(--primary);
-            margin-bottom: 16px;
-        }
-
-        .info-card {
-            background: rgba(30, 58, 138, 0.05);
-            border: 1px solid rgba(30, 58, 138, 0.1);
-            padding: 24px;
-            border-radius: 12px;
-            margin-bottom: 32px;
-        }
-
-        .info-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: var(--primary);
-            margin-bottom: 16px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .info-steps {
-            list-style: none;
-            color: var(--text-secondary);
-        }
-
-        .info-steps li {
-            margin: 12px 0;
-            padding-left: 28px;
-            position: relative;
-            font-size: 0.95rem;
-        }
-
-        .info-steps li::before {
-            content: counter(step-counter);
-            counter-increment: step-counter;
-            position: absolute;
-            left: 0;
-            top: 2px;
-            background: var(--primary);
-            color: white;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.8rem;
-            font-weight: 600;
-        }
-
-        .info-steps {
-            counter-reset: step-counter;
-        }
-
-        .form-section {
-            margin-bottom: 32px;
-        }
-
+        
         .input-group {
-            margin-bottom: 24px;
+            margin-bottom: 25px;
         }
-
+        
         .label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 0.95rem;
-            font-weight: 500;
-            color: var(--text-primary);
+            display: block;
             margin-bottom: 8px;
+            color: #555;
+            font-weight: 600;
+            font-size: 1.1rem;
         }
-
-        .label i {
-            color: var(--primary);
-        }
-
+        
         .input {
             width: 100%;
-            padding: 12px 16px;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            border-radius: 8px;
-            font-size: 0.95rem;
-            transition: border-color 0.3s ease, box-shadow 0.3s ease;
-            background: white;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.8);
         }
-
+        
         .input:focus {
             outline: none;
-            border-color: var(--primary);
-            box-shadow: var(--ring);
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
-
-        .input:hover {
-            border-color: var(--primary-dark);
-        }
-
+        
         .button {
-            padding: 12px 24px;
-            background: var(--primary);
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
-            border-radius: 8px;
-            font-size: 0.95rem;
-            font-weight: 500;
+            border-radius: 10px;
+            font-size: 1.2rem;
+            font-weight: bold;
             cursor: pointer;
-            transition: background 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
+            transition: all 0.3s ease;
+            margin-right: 10px;
+            margin-bottom: 10px;
         }
-
-        .button:hover:not(:disabled) {
-            background: var(--primary-dark);
+        
+        .button:hover {
             transform: translateY(-2px);
-            box-shadow: var(--shadow-md);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
         }
-
+        
         .button:disabled {
-            background: #94a3b8;
+            background: #ccc;
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
         }
-
+        
         .button.secondary {
-            background: var(--secondary);
-            color: var(--primary-dark);
+            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
         }
-
-        .button.secondary:hover:not(:disabled) {
-            background: var(--secondary-dark);
-        }
-
+        
         .button.success {
-            background: var(--success);
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
         }
-
+        
         .button.danger {
-            background: var(--danger);
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
         }
-
-        .button.ghost {
-            background: transparent;
-            border: 1px solid var(--primary);
-            color: var(--primary);
-        }
-
-        .button.ghost:hover:not(:disabled) {
-            background: var(--primary);
-            color: white;
-        }
-
+        
         .button-group {
             display: flex;
             flex-wrap: wrap;
-            gap: 12px;
-            margin-bottom: 24px;
+            gap: 10px;
+            margin-bottom: 20px;
         }
-
+        
         .location-selector {
             display: flex;
-            gap: 12px;
-            align-items: stretch;
+            gap: 10px;
+            align-items: center;
         }
-
-        .location-selector .input {
-            flex: 1;
-        }
-
-        .location-selector .button {
-            margin: 0;
-        }
-
+        
         .progress-container {
-            margin-bottom: 24px;
+            margin-bottom: 20px;
             display: none;
         }
-
-        .progress-wrapper {
-            background: rgba(0, 0, 0, 0.05);
-            border-radius: 8px;
-            padding: 4px;
-        }
-
+        
         .progress-bar {
-            height: 10px;
-            background: rgba(0, 0, 0, 0.1);
+            width: 100%;
+            height: 12px;
+            background: #e0e0e0;
             border-radius: 6px;
             overflow: hidden;
         }
-
+        
         .progress-fill {
             height: 100%;
-            background: var(--primary);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             transition: width 0.3s ease;
             width: 0%;
         }
-
-        .progress-text {
-            text-align: center;
-            margin-top: 8px;
-            font-size: 0.9rem;
-            color: var(--text-secondary);
-        }
-
+        
         .status {
-            margin-top: 16px;
-            padding: 16px;
-            border-radius: 8px;
-            background: rgba(0, 0, 0, 0.05);
-            color: var(--text-primary);
+            margin-top: 10px;
+            padding: 15px;
+            border-radius: 10px;
+            background: rgba(102, 126, 234, 0.1);
+            color: #333;
             text-align: center;
             display: none;
-            font-size: 0.95rem;
         }
-
-        .status.success {
-            background: rgba(34, 197, 94, 0.1);
-            color: var(--success);
+        
+        .success {
+            background: rgba(39, 174, 96, 0.1);
+            color: #27ae60;
+            border: 1px solid rgba(39, 174, 96, 0.3);
         }
-
-        .status.error {
-            background: rgba(239, 68, 68, 0.1);
-            color: var(--danger);
+        
+        .error {
+            background: rgba(231, 76, 60, 0.1);
+            color: #e74c3c;
+            border: 1px solid rgba(231, 76, 60, 0.3);
         }
-
-        .status.info {
-            background: rgba(59, 130, 246, 0.1);
-            color: #3b82f6;
-        }
-
+        
         .download-actions {
-            margin-top: 24px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            justify-content: center;
+            margin-top: 20px;
+            text-align: center;
         }
-
+        
         .download-link {
-            padding: 12px 24px;
-            background: var(--success);
+            display: inline-block;
+            margin: 5px;
+            padding: 12px 25px;
+            background: #27ae60;
             color: white;
             text-decoration: none;
             border-radius: 8px;
-            font-weight: 500;
+            font-weight: bold;
             transition: all 0.3s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
         }
-
+        
         .download-link:hover {
-            background: #16a34a;
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-md);
+            background: #2ecc71;
+            transform: translateY(-1px);
         }
-
+        
         .preview-section {
-            margin-top: 32px;
-            padding: 24px;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 12px;
-            border: 1px solid rgba(0, 0, 0, 0.1);
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(52, 73, 94, 0.1);
+            border-radius: 10px;
             display: none;
         }
-
-        .section-title {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: var(--primary);
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .section-title i {
-            color: var(--primary);
-        }
-
+        
         .websites-list {
-            margin-top: 16px;
+            margin-top: 20px;
         }
-
+        
         .website-item {
-            background: white;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            padding: 20px;
-            margin: 12px 0;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 15px;
+            margin: 10px 0;
             border-radius: 8px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            transition: all 0.3s ease;
         }
-
-        .website-item:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-md);
-        }
-
+        
         .website-info {
             flex: 1;
         }
-
+        
         .website-domain {
-            font-weight: 600;
+            font-weight: bold;
             font-size: 1.1rem;
-            color: var(--primary);
-            margin-bottom: 4px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            color: #333;
         }
-
-        .website-status {
-            font-size: 0.9rem;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .status-indicator {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            display: inline-block;
-        }
-
-        .status-indicator.online {
-            background: var(--success);
-            box-shadow: 0 0 8px rgba(34, 197, 94, 0.3);
-        }
-
-        .status-indicator.offline {
-            background: #94a3b8;
-        }
-
+        
         .website-actions {
             display: flex;
-            gap: 8px;
+            gap: 10px;
         }
-
+        
         .small-button {
-            padding: 8px 16px;
+            padding: 8px 15px;
             font-size: 0.9rem;
         }
-
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: var(--text-secondary);
+        
+        .emoji {
+            font-size: 1.2rem;
+            margin-right: 8px;
         }
-
-        .empty-state i {
-            font-size: 3rem;
-            color: #94a3b8;
-            margin-bottom: 12px;
-            display: block;
-        }
-
-        .empty-state h3 {
-            font-size: 1.1rem;
-            margin-bottom: 8px;
-        }
-
-        .loading-spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 1s ease-in-out infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .feature-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 16px;
-            margin: 32px 0;
-        }
-
-        .feature-card {
-            background: white;
-            border: 1px solid rgba(0, 0, 0, 0.1);
+        
+        .info-box {
+            background: rgba(52, 152, 219, 0.1);
+            border: 1px solid rgba(52, 152, 219, 0.3);
+            padding: 15px;
             border-radius: 8px;
-            padding: 20px;
-            text-align: center;
-            transition: all 0.3s ease;
+            margin-bottom: 20px;
+            color: #2c3e50;
         }
-
-        .feature-card:hover {
-            transform: translateY(-4px);
-            box-shadow: var(--shadow-md);
-        }
-
-        .feature-icon {
-            font-size: 2rem;
-            color: var(--primary);
-            margin-bottom: 12px;
-        }
-
-        .feature-title {
-            font-weight: 600;
-            color: var(--primary);
-            margin-bottom: 8px;
-        }
-
-        .feature-desc {
-            font-size: 0.9rem;
-            color: var(--text-secondary);
-        }
-
-        .preview-iframe {
-            width: 100%;
-            height: 600px;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            border-radius: 8px;
-            margin-top: 16px;
-            background: white;
-        }
-
-        .preview-controls {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 16px;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-
-        .preview-url {
-            font-family: monospace;
-            font-size: 0.9rem;
-            color: var(--text-secondary);
-            background: rgba(0, 0, 0, 0.05);
-            padding: 8px 12px;
-            border-radius: 4px;
-            flex: 1;
-            min-width: 200px;
-        }
-
-        @media (max-width: 768px) {
-            body {
+        
+        @media (max-width: 600px) {
+            .container {
                 padding: 20px;
             }
-
-            .container {
-                padding: 24px;
-            }
-
+            
             .title {
                 font-size: 2rem;
             }
-
+            
             .location-selector {
                 flex-direction: column;
             }
-
+            
             .button-group {
                 justify-content: center;
             }
-
+            
             .website-item {
                 flex-direction: column;
-                gap: 16px;
-                text-align: center;
+                gap: 10px;
             }
-
-            .website-actions {
-                justify-content: center;
-            }
-
-            .download-actions {
-                flex-direction: column;
-            }
-
-            .feature-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .preview-controls {
-                flex-direction: column;
-                align-items: stretch;
-            }
-
-            .preview-url {
-                text-align: center;
-            }
-        }
-
-        @media (max-width: 480px) {
-            .container {
-                padding: 16px;
-            }
-
-            .title {
-                font-size: 1.75rem;
-            }
-
-            .button {
-                width: 100%;
-                justify-content: center;
-            }
-
-            .location-selector .button {
-                width: auto;
-            }
-        }
-
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.05);
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: var(--primary);
-            border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: var(--primary-dark);
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <div class="logo">
-                <i class="fas fa-globe"></i>
-            </div>
-            <h1 class="title">Web Cloner Pro</h1>
-            <p class="subtitle">Effortlessly clone websites with all assets</p>
+        <h1 class="title">🌐 Web Cloner</h1>
+        <p style="text-align: center; color: #666; margin-bottom: 30px;">
+            Professional Website Downloader - Clone any website with all assets
+        </p>
+        
+        <div class="info-box">
+            <strong>💡 How to use:</strong><br>
+            1. Choose where to save your cloned websites<br>
+            2. Enter the website URL you want to clone<br>
+            3. Click "Clone Website" and wait for completion<br>
+            4. Use "Preview" to view the cloned website locally
         </div>
-
-        <div class="feature-grid">
-            <div class="feature-card">
-                <div class="feature-icon">
-                    <i class="fas fa-download"></i>
-                </div>
-                <div class="feature-title">Full Asset Downloads</div>
-                <div class="feature-desc">Capture HTML, CSS, JS, and images</div>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon">
-                    <i class="fas fa-eye"></i>
-                </div>
-                <div class="feature-title">Live Preview</div>
-                <div class="feature-desc">View cloned sites instantly</div>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon">
-                    <i class="fas fa-archive"></i>
-                </div>
-                <div class="feature-title">ZIP Archives</div>
-                <div class="feature-desc">Download sites as ZIP files</div>
-            </div>
-        </div>
-
-        <form id="cloneForm" class="form-section">
+        
+        <form id="cloneForm">
             <div class="input-group">
-                <label class="label" for="downloadLocation">
-                    <i class="fas fa-folder"></i>
-                    Download Location
-                </label>
+                <label class="label" for="downloadLocation">📁 Download Location:</label>
                 <div class="location-selector">
                     <input 
                         type="text" 
                         id="downloadLocation" 
                         class="input" 
-                        placeholder="Select a folder to save websites..."
+                        placeholder="Choose folder to save cloned websites..."
                         readonly
                     >
                     <button type="button" class="button secondary" onclick="chooseDownloadLocation()">
-                        <i class="fas fa-folder-open"></i>
-                        Browse
+                        <span class="emoji">📂</span>Browse
                     </button>
                 </div>
             </div>
-
+            
             <div class="input-group">
-                <label class="label" for="url">
-                    <i class="fas fa-link"></i>
-                    Website URL
-                </label>
+                <label class="label" for="url">🌐 Website URL:</label>
                 <input 
                     type="url" 
                     id="url" 
@@ -1221,120 +836,57 @@ def create_templates():
                     required
                 >
             </div>
-
+            
             <div class="button-group">
                 <button type="submit" class="button" id="cloneBtn">
-                    <i class="fas fa-rocket"></i>
-                    Clone Website
+                    <span class="emoji">🚀</span>Clone Website
                 </button>
-                <button type="button" class="button ghost" onclick="togglePreviewSection()">
-                    <i class="fas fa-list"></i>
-                    View Cloned Websites
+                <button type="button" class="button secondary" onclick="showPreviewSection()">
+                    <span class="emoji">👁️</span>Show Cloned Websites
                 </button>
             </div>
         </form>
-
+        
         <div class="progress-container" id="progressContainer">
-            <div class="progress-wrapper">
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progressFill"></div>
-                </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
             </div>
-            <div class="progress-text" id="progressText">Initializing...</div>
         </div>
-
+        
         <div class="status" id="status"></div>
-
+        
         <div class="preview-section" id="previewSection">
-            <h3 class="section-title">
-                <i class="fas fa-server"></i>
-                Cloned Websites
-            </h3>
+            <h3 style="color: #333; margin-bottom: 15px;">📚 Your Cloned Websites</h3>
             <div class="websites-list" id="websitesList">
-                <div class="empty-state">
-                    <i class="fas fa-spinner fa-spin"></i>
-                    <h3>Loading...</h3>
-                    <p>Fetching your cloned websites</p>
-                </div>
+                <p style="text-align: center; color: #666;">Loading...</p>
             </div>
         </div>
     </div>
 
     <script>
-        // SocketIO with enhanced reconnection handling - fallback to polling for Render
-        const socket = io({
-            path: '/socket.io',
-            reconnection: true,
-            reconnectionAttempts: 10,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 10000,
-            randomizationFactor: 0.5,
-            transports: ['polling', 'websocket'] // Polling first for Render compatibility
-        });
-
-        socket.on('connect_error', (error) => {
-            console.error('Connection error:', error);
-            showStatus('Connection error, retrying...', 'error');
-        });
-
-        socket.on('reconnect', (attempt) => {
-            console.log(`Reconnected successfully after ${attempt} attempts`);
-            showStatus('Reconnected to server!', 'success');
-        });
-
-        socket.on('reconnect_error', (error) => {
-            console.error('Reconnection error:', error);
-            showStatus('Failed to reconnect: ' + error.message, 'error');
-        });
-
-        socket.on('reconnect_failed', () => {
-            console.error('Reconnection failed after maximum attempts');
-            showStatus('Failed to reconnect to server. Please refresh the page.', 'error');
-        });
-
-        let disconnectTimeout;
-        socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-            showStatus('Disconnected from server, attempting to reconnect...', 'info');
-            disconnectTimeout = setTimeout(() => {
-                showStatus('Server unavailable. Reloading page...', 'error');
-                setTimeout(() => location.reload(), 2000);
-            }, 30000); // 30 seconds timeout
-        });
-
-        socket.on('connect', () => {
-            console.log('Connected to server');
-            clearTimeout(disconnectTimeout);
-            showStatus('Connected to server!', 'success');
-        });
-
+        const socket = io();
         const form = document.getElementById('cloneForm');
         const urlInput = document.getElementById('url');
         const locationInput = document.getElementById('downloadLocation');
         const cloneBtn = document.getElementById('cloneBtn');
         const progressContainer = document.getElementById('progressContainer');
         const progressFill = document.getElementById('progressFill');
-        const progressText = document.getElementById('progressText');
         const status = document.getElementById('status');
         const previewSection = document.getElementById('previewSection');
         const websitesList = document.getElementById('websitesList');
         
         let currentDownloadLocation = '';
-        let isCloning = false;
         
         // Initialize default download location
         window.addEventListener('load', () => {
             const defaultLocation = './cloned_websites';
             locationInput.value = defaultLocation;
             currentDownloadLocation = defaultLocation;
-            console.log('Default download location set:', defaultLocation);
-            // Load cloned websites if section is visible
-            if (previewSection.style.display === 'block') {
-                loadClonedWebsites();
-            }
         });
         
         function chooseDownloadLocation() {
+            // For web interface, we'll use a simple prompt
+            // In a real implementation, you might use a file picker API
             const location = prompt('Enter the full path where you want to save cloned websites:', currentDownloadLocation || './cloned_websites');
             if (location) {
                 fetch('/api/set_download_location', {
@@ -1350,61 +902,37 @@ def create_templates():
                         locationInput.value = location;
                         currentDownloadLocation = location;
                         showStatus('Download location set successfully!', 'success');
-                        console.log('Download location updated:', location);
                     } else {
                         showStatus('Error setting download location: ' + data.error, 'error');
-                        console.error('Error setting download location:', data.error);
                     }
                 })
                 .catch(error => {
                     showStatus('Error: ' + error.message, 'error');
-                    console.error('Error in chooseDownloadLocation:', error);
                 });
             }
         }
         
-        function togglePreviewSection() {
-            const isVisible = previewSection.style.display === 'block';
-            previewSection.style.display = isVisible ? 'none' : 'block';
-            if (!isVisible) {
+        function showPreviewSection() {
+            previewSection.style.display = previewSection.style.display === 'none' ? 'block' : 'none';
+            if (previewSection.style.display === 'block') {
                 loadClonedWebsites();
             }
         }
         
         function loadClonedWebsites() {
-            websitesList.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-spinner fa-spin"></i>
-                    <h3>Loading...</h3>
-                    <p>Fetching your cloned websites</p>
-                </div>
-            `;
+            websitesList.innerHTML = '<p style="text-align: center; color: #666;">Loading...</p>';
             
             fetch('/api/get_cloned_websites')
                 .then(response => response.json())
                 .then(data => {
-                    console.log('Cloned websites data:', data);
                     if (data.websites && data.websites.length > 0) {
                         displayWebsites(data.websites);
                     } else {
-                        websitesList.innerHTML = `
-                            <div class="empty-state">
-                                <i class="fas fa-globe"></i>
-                                <h3>No websites cloned yet</h3>
-                                <p>Clone your first website to get started!</p>
-                            </div>
-                        `;
+                        websitesList.innerHTML = '<p style="text-align: center; color: #666;">No cloned websites found. Clone a website first!</p>';
                     }
                 })
                 .catch(error => {
-                    websitesList.innerHTML = `
-                        <div class="empty-state">
-                            <i class="fas fa-exclamation-triangle"></i>
-                            <h3>Error loading websites</h3>
-                            <p>${error.message}</p>
-                        </div>
-                    `;
-                    console.error('Error loading cloned websites:', error);
+                    websitesList.innerHTML = '<p style="text-align: center; color: #e74c3c;">Error loading websites: ' + error.message + '</p>';
                 });
         }
         
@@ -1415,31 +943,15 @@ def create_templates():
                 const websiteDiv = document.createElement('div');
                 websiteDiv.className = 'website-item';
                 
-                const previewButtonText = website.has_preview ? 'View Preview' : 'Start Preview';
-                const stopButtonHtml = website.has_preview ? `
-                    <button class="button danger small-button" onclick="stopPreview('${website.domain}')">
-                        <i class="fas fa-stop"></i>
-                        Stop
-                    </button>
-                ` : '';
-                
                 websiteDiv.innerHTML = `
                     <div class="website-info">
-                        <div class="website-domain">
-                            <i class="fas fa-globe"></i>
-                            ${website.domain}
-                        </div>
-                        <div class="website-status">
-                            <span class="status-indicator ${website.has_preview ? 'online' : 'offline'}"></span>
-                            ${website.has_preview ? 'Preview Running' : 'Ready to Preview'}
-                        </div>
+                        <div class="website-domain">🌐 ${website.domain}</div>
+                        <small style="color: #666;">Status: ${website.has_preview ? '🟢 Preview Running' : '⚪ Ready to Preview'}</small>
                     </div>
                     <div class="website-actions">
                         <button class="button success small-button" onclick="previewWebsite('${website.domain}')">
-                            <i class="fas fa-eye"></i>
-                            ${previewButtonText}
+                            <span class="emoji">👁️</span>Preview
                         </button>
-                        ${stopButtonHtml}
                     </div>
                 `;
                 
@@ -1448,93 +960,26 @@ def create_templates():
         }
         
         function previewWebsite(domain) {
-            const button = event.target.closest('.button');
-            const originalContent = button.innerHTML;
-            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
-            button.disabled = true;
-            
-            showStatus(`Starting preview for ${domain}...`, 'info');
-            console.log(`Attempting to preview website: ${domain}`);
+            showStatus(`Starting preview server for ${domain}...`, 'info');
             
             fetch(`/api/preview/${domain}`)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    return response.json();
-                })
+                .then(response => response.json())
                 .then(data => {
-                    console.log('Preview response:', data);
                     if (data.success) {
-                        const previewUrl = data.preview_url;
-                        console.log(`Opening preview URL: ${previewUrl}`);
+                        // Open preview in new window/tab
+                        window.open(data.preview_url, '_blank');
+                        showStatus(`Preview started! Opening ${domain} at ${data.preview_url}`, 'success');
                         
-                        // Try to open in new window
-                        const newWindow = window.open(previewUrl, '_blank', 'width=1200,height=800');
-                        if (newWindow) {
-                            showStatus(`Preview opened for ${domain} at ${previewUrl}`, 'success');
-                        } else {
-                            // Fallback: show URL to user
-                            showStatus(`Preview ready! Open manually: ${previewUrl}`, 'success');
-                            
-                            // Create a clickable link in the status
-                            setTimeout(() => {
-                                const statusEl = document.getElementById('status');
-                                statusEl.innerHTML = `
-                                    Preview ready for ${domain}!<br>
-                                    <a href="${previewUrl}" target="_blank" style="color: var(--primary); text-decoration: underline; font-weight: 600;">
-                                        Click here to open: ${previewUrl}
-                                    </a>
-                                `;
-                            }, 500);
-                        }
-                        
-                        // Refresh websites list
+                        // Refresh the websites list to update status
                         setTimeout(() => {
                             loadClonedWebsites();
                         }, 1000);
                     } else {
                         showStatus('Error starting preview: ' + data.error, 'error');
-                        console.error('Preview error:', data.error);
                     }
                 })
                 .catch(error => {
                     showStatus('Error: ' + error.message, 'error');
-                    console.error('Error in previewWebsite:', error);
-                })
-                .finally(() => {
-                    button.innerHTML = originalContent;
-                    button.disabled = false;
-                });
-        }
-        
-        function stopPreview(domain) {
-            const button = event.target.closest('.button');
-            const originalContent = button.innerHTML;
-            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Stopping...';
-            button.disabled = true;
-            
-            showStatus(`Stopping preview server for ${domain}...`, 'info');
-            
-            fetch(`/api/stop_preview/${domain}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showStatus(`Preview stopped for ${domain}`, 'success');
-                        setTimeout(() => {
-                            loadClonedWebsites();
-                        }, 1000);
-                    } else {
-                        showStatus('Error stopping preview: ' + data.error, 'error');
-                    }
-                })
-                .catch(error => {
-                    showStatus('Error: ' + error.message, 'error');
-                    console.error('Error in stopPreview:', error);
-                })
-                .finally(() => {
-                    button.innerHTML = originalContent;
-                    button.disabled = false;
                 });
         }
         
@@ -1542,80 +987,30 @@ def create_templates():
             status.innerHTML = message;
             status.className = `status ${type}`;
             status.style.display = 'block';
-            
-            // Auto hide after 5 seconds for non-error messages
-            if (type !== 'error') {
-                setTimeout(() => {
-                    status.style.display = 'none';
-                }, 5000);
-            }
-        }
-        
-        function resetForm() {
-            try {
-                console.log('=== RESET FORM DEBUG ===');
-                console.log('Before reset - isCloning:', isCloning);
-                console.log('Before reset - button disabled:', cloneBtn.disabled);
-                console.log('Before reset - button innerHTML:', cloneBtn.innerHTML);
-                
-                isCloning = false;
-                cloneBtn.disabled = false;
-                cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
-                progressFill.style.width = '0%';
-                progressContainer.style.display = 'none';
-                progressText.textContent = 'Initializing...';
-                
-                console.log('After reset - isCloning:', isCloning);
-                console.log('After reset - button disabled:', cloneBtn.disabled);
-                console.log('After reset - button innerHTML:', cloneBtn.innerHTML);
-                console.log('=== RESET FORM COMPLETE ===');
-            } catch (error) {
-                console.error('Error in resetForm:', error);
-                // Force reset even if there's an error
-                isCloning = false;
-                if (cloneBtn) {
-                    cloneBtn.disabled = false;
-                    cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
-                }
-                showStatus('Error resetting form: ' + error.message, 'error');
-            }
         }
         
         form.addEventListener('submit', (e) => {
             e.preventDefault();
-            
-            if (isCloning) {
-                console.log('Cloning already in progress, ignoring submission');
-                return;
-            }
             
             const url = urlInput.value.trim();
             const downloadLocation = currentDownloadLocation;
             
             if (!url) {
                 showStatus('Please enter a website URL', 'error');
-                console.error('No URL provided');
                 return;
             }
             
             if (!downloadLocation) {
                 showStatus('Please choose a download location', 'error');
-                console.error('No download location provided');
                 return;
             }
             
-            // Set cloning state
-            isCloning = true;
-            
             // Reset UI
             cloneBtn.disabled = true;
-            cloneBtn.innerHTML = '<span class="loading-spinner"></span> Cloning...';
+            cloneBtn.innerHTML = '<span class="emoji">⏳</span>Cloning...';
             progressContainer.style.display = 'block';
-            showStatus('Initializing cloning process...', 'info');
+            showStatus('Initializing...', 'info');
             progressFill.style.width = '0%';
-            progressText.textContent = 'Initializing...';
-            
-            console.log('Starting clone process for URL:', url, 'Location:', downloadLocation);
             
             // Start cloning
             socket.emit('clone_website', { 
@@ -1628,110 +1023,54 @@ def create_templates():
             showStatus(data.message, 'info');
             if (data.progress !== undefined) {
                 progressFill.style.width = data.progress + '%';
-                progressText.textContent = `${data.message} (${data.progress}%)`;
             }
-            console.log('Status update:', data);
         });
         
         socket.on('clone_complete', (data) => {
-            console.log('Clone complete:', data);
-            
-            // Immediately reset the button state
-            isCloning = false;
-            cloneBtn.disabled = false;
-            cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
-            
-            showStatus(`Website cloned successfully!`, 'success');
-            progressText.textContent = 'Completed successfully!';
-            progressFill.style.width = '100%';
+            showStatus(`✅ Website cloned successfully!`, 'success');
             
             const actionsHtml = `
                 <div class="download-actions">
                     <a href="${data.download_url}" class="download-link">
-                        <i class="fas fa-download"></i>
-                        Download ZIP Archive
+                        <span class="emoji">📥</span>Download ZIP Archive
                     </a>
                     <button class="button success" onclick="previewWebsite('${data.domain}')">
-                        <i class="fas fa-eye"></i>
-                        Preview Website
+                        <span class="emoji">👁️</span>Preview Website
                     </button>
-                    <button class="button ghost" onclick="togglePreviewSection()">
-                        <i class="fas fa-list"></i>
-                        Show All Websites
+                    <button class="button secondary" onclick="showPreviewSection()">
+                        <span class="emoji">📚</span>Show All Websites
                     </button>
                 </div>
             `;
             
             status.innerHTML += actionsHtml;
-            
-            // Hide progress after a delay
-            setTimeout(() => {
-                progressContainer.style.display = 'none';
-                progressFill.style.width = '0%';
-                progressText.textContent = 'Initializing...';
-            }, 3000);
+            resetForm();
             
             // Auto-refresh websites list if it's visible
             if (previewSection.style.display === 'block') {
                 setTimeout(() => {
                     loadClonedWebsites();
-                }, 1500);
+                }, 1000);
             }
         });
         
         socket.on('clone_error', (data) => {
-            console.error('Clone error:', data);
-            
-            // Immediately reset the button state
-            isCloning = false;
+            showStatus(`❌ Error: ${data.error}`, 'error');
+            resetForm();
+        });
+        
+        function resetForm() {
             cloneBtn.disabled = false;
-            cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
-            
-            showStatus(`Error: ${data.error}`, 'error');
-            progressText.textContent = 'Error occurred';
-            
-            // Hide progress after a delay
-            setTimeout(() => {
-                progressContainer.style.display = 'none';
-                progressFill.style.width = '0%';
-                progressText.textContent = 'Initializing...';
-            }, 3000);
-        });
-
-        // Add URL validation
-        urlInput.addEventListener('input', function() {
-            const url = this.value.trim();
-            if (url && !url.match(/^https?:\/\//)) {
-                this.style.borderColor = 'var(--warning)';
-            } else {
-                this.style.borderColor = '';
-            }
-        });
-
-        // Add keyboard shortcuts
-        document.addEventListener('keydown', function(e) {
-            // Ctrl/Cmd + Enter to submit form
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                if (!cloneBtn.disabled && !isCloning) {
-                    form.dispatchEvent(new Event('submit'));
-                }
-            }
-        });
+            cloneBtn.innerHTML = '<span class="emoji">🚀</span>Clone Website';
+            progressFill.style.width = '100%';
+        }
         
-        // Force reset button state on page visibility change
-        document.addEventListener('visibilitychange', function() {
-            if (document.visibilityState === 'visible' && !isCloning) {
-                resetForm();
+        // Auto-load websites on page load if section is visible
+        window.addEventListener('load', () => {
+            if (previewSection.style.display === 'block') {
+                loadClonedWebsites();
             }
         });
-        
-        // Backup reset mechanism
-        setInterval(() => {
-            if (!isCloning && cloneBtn.disabled) {
-                console.warn('Detected stuck button state, forcing reset');
-                resetForm();
-            }
-        }, 5000);
     </script>
 </body>
 </html>'''
@@ -1748,23 +1087,18 @@ if __name__ == '__main__':
     os.makedirs(default_output, exist_ok=True)
     
     print("=" * 60)
-    print("🌐 Web Cloner Pro - Enhanced Version")
+    print("🌐 Web Cloner Server - Enhanced Version")
     print("=" * 60)
     print("🚀 Features:")
-    print("   • Modern, attractive UI with professional design")
     print("   • Choose custom download location")
     print("   • Preview cloned websites locally")
     print("   • Download ZIP archives")
     print("   • Manage multiple cloned sites")
-    print("   • Real-time progress tracking")
-    print("   • Responsive design for all devices")
     print()
     print("📱 Web Interface: http://localhost:5000")
     print("📁 Default Download Location:", default_output)
     print()
     print("🔧 Keep this terminal open to run the server")
-    print("💡 For Render deployment: Create a Procfile with 'web: gunicorn --worker-class gevent --workers 1 app:app'")
-    print("   Install gunicorn and gevent: pip install gunicorn gevent")
     print("=" * 60)
     
     # Auto-open browser
@@ -1777,10 +1111,9 @@ if __name__ == '__main__':
     
     Thread(target=open_browser, daemon=True).start()
     
-    # Run Flask app - Bind to 0.0.0.0 for Render
+    # Run Flask app
     try:
-        port = int(os.environ.get('PORT', 5000))
-        socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
+        socketio.run(app, host='localhost', port=5000, debug=False, allow_unsafe_werkzeug=True)
     except KeyboardInterrupt:
         print("\n🛑 Server stopped by user")
     except Exception as e:
@@ -1791,6 +1124,5 @@ if __name__ == '__main__':
             try:
                 if 'httpd' in server_info:
                     server_info['httpd'].shutdown()
-                    server_info['httpd'].server_close()
             except:
                 pass
