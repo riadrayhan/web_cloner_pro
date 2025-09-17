@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Cloner Pro - Professional Website Downloader</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.0/socket.io.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #10b981;
+            --primary-dark: #059669;
+            --secondary: #d1fae5;
+            --accent: #34d399;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --dark: #064e3b;
+            --gray-100: #f0fdf4;
+            --gray-200: #dcfce7;
+            --gray-300: #bbf7d0;
+            --gray-600: #16a34a;
+            --gray-700: #15803d;
+            --gray-800: #166534;
+            --gray-900: #14532d;
+            --white: #ffffff;
+            --light-green: #ecfdf5;
+            --medium-green: #a7f3d0;
+            --shadow-sm: 0 1px 2px 0 rgb(16 185 129 / 0.1);
+            --shadow-md: 0 4px 6px -1px rgb(16 185 129 / 0.15), 0 2px 4px -2px rgb(16 185 129 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(16 185 129 / 0.15), 0 4px 6px -4px rgb(16 185 129 / 0.1);
+            --shadow-xl: 0 20px 25px -5px rgb(16 185 129 / 0.15), 0 8px 10px -6px rgb(16 185 129 / 0.1);
+            --ring-primary: 0 0 0 3px rgb(16 185 129 / 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, var(--light-green) 0%, var(--secondary) 30%, var(--medium-green) 70%, var(--accent) 100%);
+            min-height: 100vh;
+            padding: 20px;
+            font-size: 16px;
+            line-height: 1.6;
+            color: var(--gray-800);
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(16, 185, 129, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(52, 211, 153, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 40% 80%, rgba(167, 243, 208, 0.2) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        
+        .container {
+            position: relative;
+            z-index: 1;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 50px;
+            border-radius: 24px;
+            box-shadow: var(--shadow-xl);
+            max-width: 900px;
+            margin: 0 auto;
+            transform: translateY(0);
+            transition: all 0.3s ease;
+        }
+
+        .container:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        .title {
+            font-size: 3.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 50%, var(--primary-dark) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 16px;
+            letter-spacing: -0.02em;
+        }
+
+        .subtitle {
+            font-size: 1.25rem;
+            color: var(--gray-700);
+            font-weight: 500;
+            margin-bottom: 32px;
+        }
+
+        .logo {
+            font-size: 4rem;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .info-card {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(52, 211, 153, 0.12) 100%);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            padding: 24px;
+            border-radius: 16px;
+            margin-bottom: 32px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .info-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--primary) 0%, var(--accent) 100%);
+        }
+
+        .info-title {
+            font-weight: 700;
+            color: var(--gray-800);
+            margin-bottom: 12px;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .info-steps {
+            list-style: none;
+            color: var(--gray-700);
+        }
+
+        .info-steps li {
+            margin: 8px 0;
+            padding-left: 24px;
+            position: relative;
+        }
+
+        .info-steps li::before {
+            content: counter(step-counter);
+            counter-increment: step-counter;
+            position: absolute;
+            left: 0;
+            top: 0;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            color: white;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .info-steps {
+            counter-reset: step-counter;
+        }
+
+        .form-section {
+            margin-bottom: 32px;
+        }
+        
+        .input-group {
+            margin-bottom: 24px;
+        }
+        
+        .label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            color: var(--gray-700);
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .label i {
+            color: var(--primary);
+        }
+        
+        .input {
+            width: 100%;
+            padding: 16px 20px;
+            border: 2px solid var(--gray-200);
+            border-radius: 12px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            background: var(--white);
+            font-family: inherit;
+        }
+        
+        .input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: var(--ring-primary);
+            transform: translateY(-1px);
+        }
+
+        .input:hover {
+            border-color: var(--gray-300);
+        }
+        
+        .button {
+            padding: 16px 32px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-right: 12px;
+            margin-bottom: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .button:hover::before {
+            left: 100%;
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(16, 185, 129, 0.3);
+        }
+        
+        .button:disabled {
+            background: var(--gray-300);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+            opacity: 0.6;
+        }
+
+        .button:disabled::before {
+            display: none;
+        }
+        
+        .button.secondary {
+            background: linear-gradient(135deg, var(--warning) 0%, #f97316 100%);
+        }
+        
+        .button.success {
+            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+        }
+        
+        .button.danger {
+            background: linear-gradient(135deg, var(--danger) 0%, #dc2626 100%);
+        }
+
+        .button.ghost {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid var(--primary);
+            color: var(--primary);
+        }
+
+        .button.ghost:hover {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .button-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        
+        .location-selector {
+            display: flex;
+            gap: 12px;
+            align-items: stretch;
+        }
+
+        .location-selector .input {
+            flex: 1;
+        }
+
+        .location-selector .button {
+            margin: 0;
+            height: auto;
+            display: flex;
+            align-items: center;
+        }
+        
+        .progress-container {
+            margin-bottom: 24px;
+            display: none;
+        }
+
+        .progress-wrapper {
+            background: var(--gray-100);
+            border-radius: 10px;
+            padding: 4px;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 12px;
+            background: var(--gray-200);
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            transition: width 0.3s ease;
+            width: 0%;
+            position: relative;
+            border-radius: 8px;
+        }
+
+        .progress-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            animation: shimmer 2s infinite;
+        }
+
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        .progress-text {
+            text-align: center;
+            margin-top: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--gray-600);
+        }
+        
+        .status {
+            margin-top: 16px;
+            padding: 20px;
+            border-radius: 12px;
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--gray-800);
+            text-align: center;
+            display: none;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            font-weight: 500;
+        }
+        
+        .status.success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+            border-color: rgba(16, 185, 129, 0.2);
+        }
+        
+        .status.error {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        .status.info {
+            background: rgba(59, 130, 246, 0.1);
+            color: #3b82f6;
+            border-color: rgba(59, 130, 246, 0.2);
+        }
+        
+        .download-actions {
+            margin-top: 24px;
+            text-align: center;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            justify-content: center;
+        }
+        
+        .download-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 28px;
+            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 10px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            font-size: 0.95rem;
+        }
+        
+        .download-link:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
+        }
+        
+        .preview-section {
+            margin-top: 40px;
+            padding: 32px;
+            background: rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            display: none;
+            box-shadow: var(--shadow-md);
+        }
+        
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--gray-800);
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .section-title i {
+            color: var(--primary);
+        }
+        
+        .websites-list {
+            margin-top: 20px;
+        }
+        
+        .website-item {
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid var(--gray-200);
+            padding: 24px;
+            margin: 16px 0;
+            border-radius: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .website-item:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+            border-color: var(--primary);
+        }
+        
+        .website-info {
+            flex: 1;
+        }
+        
+        .website-domain {
+            font-weight: 700;
+            font-size: 1.2rem;
+            color: var(--gray-800);
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .website-domain i {
+            color: var(--primary);
+        }
+
+        .website-status {
+            font-size: 0.9rem;
+            color: var(--gray-600);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-indicator.online {
+            background: var(--success);
+            box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+        }
+
+        .status-indicator.offline {
+            background: var(--gray-400);
+        }
+        
+        .website-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .small-button {
+            padding: 10px 16px;
+            font-size: 0.9rem;
+            margin: 0;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--gray-600);
+        }
+
+        .empty-state i {
+            font-size: 4rem;
+            color: var(--gray-400);
+            margin-bottom: 16px;
+            display: block;
+        }
+
+        .empty-state h3 {
+            font-size: 1.25rem;
+            margin-bottom: 8px;
+            color: var(--gray-700);
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 32px 0;
+        }
+
+        .feature-card {
+            background: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .feature-title {
+            font-weight: 600;
+            color: var(--gray-800);
+            margin-bottom: 8px;
+        }
+
+        .feature-desc {
+            font-size: 0.9rem;
+            color: var(--gray-600);
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 32px 24px;
+                margin: 10px;
+            }
+            
+            .title {
+                font-size: 2.5rem;
+            }
+
+            .logo {
+                font-size: 3rem;
+            }
+            
+            .location-selector {
+                flex-direction: column;
+            }
+            
+            .button-group {
+                justify-content: center;
+            }
+            
+            .website-item {
+                flex-direction: column;
+                gap: 16px;
+                text-align: center;
+            }
+
+            .website-actions {
+                justify-content: center;
+            }
+
+            .download-actions {
+                flex-direction: column;
+            }
+
+            .feature-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                padding: 24px 16px;
+            }
+
+            .title {
+                font-size: 2rem;
+            }
+
+            .button {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .location-selector .button {
+                width: auto;
+            }
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--gray-100);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">
+                <i class="fas fa-globe-americas"></i>
+            </div>
+            <h1 class="title">Web Cloner Pro</h1>
+            <p class="subtitle">Professional Website Downloader - Clone any website with all assets</p>
+        </div>
+
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-download"></i>
+                </div>
+                <div class="feature-title">Complete Downloads</div>
+                <div class="feature-desc">Downloads HTML, CSS, JS, images, and all assets</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-eye"></i>
+                </div>
+                <div class="feature-title">Live Preview</div>
+                <div class="feature-desc">Preview cloned websites in your browser instantly</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-archive"></i>
+                </div>
+                <div class="feature-title">ZIP Archives</div>
+                <div class="feature-desc">Get downloadable ZIP files of cloned websites</div>
+            </div>
+        </div>
+        
+        <form id="cloneForm" class="form-section">
+            <div class="input-group">
+                <label class="label" for="downloadLocation">
+                    <i class="fas fa-folder"></i>
+                    Download Location
+                </label>
+                <div class="location-selector">
+                    <input 
+                        type="text" 
+                        id="downloadLocation" 
+                        class="input" 
+                        placeholder="Choose folder to save cloned websites..."
+                        readonly
+                    >
+                    <button type="button" class="button secondary" onclick="chooseDownloadLocation()">
+                        <i class="fas fa-folder-open"></i>
+                        Browse
+                    </button>
+                </div>
+            </div>
+            
+            <div class="input-group">
+                <label class="label" for="url">
+                    <i class="fas fa-link"></i>
+                    Website URL
+                </label>
+                <input 
+                    type="url" 
+                    id="url" 
+                    class="input" 
+                    placeholder="https://example.com"
+                    required
+                >
+            </div>
+            
+            <div class="button-group">
+                <button type="submit" class="button" id="cloneBtn">
+                    <i class="fas fa-rocket"></i>
+                    Clone Website
+                </button>
+                <button type="button" class="button ghost" onclick="showPreviewSection()">
+                    <i class="fas fa-list"></i>
+                    Show Cloned Websites
+                </button>
+            </div>
+        </form>
+        
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-wrapper">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+            </div>
+            <div class="progress-text" id="progressText">Initializing...</div>
+        </div>
+        
+        <div class="status" id="status"></div>
+        
+        <div class="preview-section" id="previewSection">
+            <h3 class="section-title">
+                <i class="fas fa-server"></i>
+                Your Cloned Websites
+            </h3>
+            <div class="websites-list" id="websitesList">
+                <div class="empty-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <h3>Loading...</h3>
+                    <p>Fetching your cloned websites</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const form = document.getElementById('cloneForm');
+        const urlInput = document.getElementById('url');
+        const locationInput = document.getElementById('downloadLocation');
+        const cloneBtn = document.getElementById('cloneBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const status = document.getElementById('status');
+        const previewSection = document.getElementById('previewSection');
+        const websitesList = document.getElementById('websitesList');
+        
+        let currentDownloadLocation = '';
+        
+        // Initialize default download location
+        window.addEventListener('load', () => {
+            const defaultLocation = './cloned_websites';
+            locationInput.value = defaultLocation;
+            currentDownloadLocation = defaultLocation;
+        });
+        
+        function chooseDownloadLocation() {
+            // For web interface, we'll use a simple prompt
+            // In a real implementation, you might use a file picker API
+            const location = prompt('Enter the full path where you want to save cloned websites:', currentDownloadLocation || './cloned_websites');
+            if (location) {
+                fetch('/api/set_download_location', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({location: location})
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        locationInput.value = location;
+                        currentDownloadLocation = location;
+                        showStatus('Download location set successfully!', 'success');
+                    } else {
+                        showStatus('Error setting download location: ' + data.error, 'error');
+                    }
+                })
+                .catch(error => {
+                    showStatus('Error: ' + error.message, 'error');
+                });
+            }
+        }
+        
+        function showPreviewSection() {
+            const isVisible = previewSection.style.display === 'block';
+            previewSection.style.display = isVisible ? 'none' : 'block';
+            if (!isVisible) {
+                loadClonedWebsites();
+            }
+        }
+        
+        function loadClonedWebsites() {
+            websitesList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <h3>Loading...</h3>
+                    <p>Fetching your cloned websites</p>
+                </div>
+            `;
+            
+            fetch('/api/get_cloned_websites')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.websites && data.websites.length > 0) {
+                        displayWebsites(data.websites);
+                    } else {
+                        websitesList.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-globe"></i>
+                                <h3>No websites cloned yet</h3>
+                                <p>Clone your first website to get started!</p>
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    websitesList.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <h3>Error loading websites</h3>
+                            <p>${error.message}</p>
+                        </div>
+                    `;
+                });
+        }
+        
+        function displayWebsites(websites) {
+            websitesList.innerHTML = '';
+            
+            websites.forEach(website => {
+                const websiteDiv = document.createElement('div');
+                websiteDiv.className = 'website-item';
+                
+                websiteDiv.innerHTML = `
+                    <div class="website-info">
+                        <div class="website-domain">
+                            <i class="fas fa-globe"></i>
+                            ${website.domain}
+                        </div>
+                        <div class="website-status">
+                            <span class="status-indicator ${website.has_preview ? 'online' : 'offline'}"></span>
+                            ${website.has_preview ? 'Preview Running' : 'Ready to Preview'}
+                        </div>
+                    </div>
+                    <div class="website-actions">
+                        <button class="button success small-button" onclick="previewWebsite('${website.domain}')">
+                            <i class="fas fa-eye"></i>
+                            Preview
+                        </button>
+                    </div>
+                `;
+                
+                websitesList.appendChild(websiteDiv);
+            });
+        }
+        
+        function previewWebsite(domain) {
+            showStatus(`Starting preview server for ${domain}...`, 'info');
+            
+            fetch(`/api/preview/${domain}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Open preview in new window/tab
+                        window.open(data.preview_url, '_blank');
+                        showStatus(`Preview started! Opening ${domain} at ${data.preview_url}`, 'success');
+                        
+                        // Refresh the websites list to update status
+                        setTimeout(() => {
+                            loadClonedWebsites();
+                        }, 1000);
+                    } else {
+                        showStatus('Error starting preview: ' + data.error, 'error');
+                    }
+                })
+                .catch(error => {
+                    showStatus('Error: ' + error.message, 'error');
+                });
+        }
+        
+        function showStatus(message, type = 'info') {
+            status.innerHTML = message;
+            status.className = `status ${type}`;
+            status.style.display = 'block';
+            
+            // Auto hide after 5 seconds for non-error messages
+            if (type !== 'error') {
+                setTimeout(() => {
+                    status.style.display = 'none';
+                }, 5000);
+            }
+        }
+        
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            
+            const url = urlInput.value.trim();
+            const downloadLocation = currentDownloadLocation;
+            
+            if (!url) {
+                showStatus('Please enter a website URL', 'error');
+                return;
+            }
+            
+            if (!downloadLocation) {
+                showStatus('Please choose a download location', 'error');
+                return;
+            }
+            
+            // Reset UI
+            cloneBtn.disabled = true;
+            cloneBtn.innerHTML = '<span class="loading-spinner"></span> Cloning...';
+            progressContainer.style.display = 'block';
+            showStatus('Initializing cloning process...', 'info');
+            progressFill.style.width = '0%';
+            progressText.textContent = 'Initializing...';
+            
+            // Start cloning
+            socket.emit('clone_website', { 
+                url: url, 
+                downloadLocation: downloadLocation 
+            });
+        });
+        
+        socket.on('status_update', (data) => {
+            showStatus(data.message, 'info');
+            if (data.progress !== undefined) {
+                progressFill.style.width = data.progress + '%';
+                progressText.textContent = `${data.message} (${data.progress}%)`;
+            }
+        });
+        
+        socket.on('clone_complete', (data) => {
+            showStatus(`Website cloned successfully!`, 'success');
+            progressText.textContent = 'Completed successfully!';
+            
+            const actionsHtml = `
+                <div class="download-actions">
+                    <a href="${data.download_url}" class="download-link">
+                        <i class="fas fa-download"></i>
+                        Download ZIP Archive
+                    </a>
+                    <button class="button success" onclick="previewWebsite('${data.domain}')">
+                        <i class="fas fa-eye"></i>
+                        Preview Website
+                    </button>
+                    <button class="button ghost" onclick="showPreviewSection()">
+                        <i class="fas fa-list"></i>
+                        Show All Websites
+                    </button>
+                </div>
+            `;
+            
+            status.innerHTML += actionsHtml;
+            resetForm();
+            
+            // Auto-refresh websites list if it's visible
+            if (previewSection.style.display === 'block') {
+                setTimeout(() => {
+                    loadClonedWebsites();
+                }, 1000);
+            }
+        });
+        
+        socket.on('clone_error', (data) => {
+            showStatus(`Error: ${data.error}`, 'error');
+            progressText.textContent = 'Error occurred';
+            resetForm();
+        });
+        
+        function resetForm() {
+            cloneBtn.disabled = false;
+            cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
+            progressFill.style.width = '100%';
+        }
+        
+        // Auto-load websites on page load if section is visible
+        window.addEventListener('load', () => {
+            if (previewSection.style.display === 'block') {
+                loadClonedWebsites();
+            }
+        });
+
+        // Add URL validation
+        urlInput.addEventListener('input', function() {
+            const url = this.value.trim();
+            if (url && !url.match(/^https?:\/\//)) {
+                this.style.borderColor = 'var(--warning)';
+            } else {
+                this.style.borderColor = 'var(--gray-200)';
+            }
+        });
+
+        // Add keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            // Ctrl/Cmd + Enter to submit form
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                if (!cloneBtn.disabled) {
+                    form.dispatchEvent(new Event('submit'));
+                }
+            }
+        });
+    </script>
+</body>
+</html>
