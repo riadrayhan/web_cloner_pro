@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Web Cloner Pro - Professional Website Downloader</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.0/socket.io.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
-            --primary: #1e3a8a; /* Deep Indigo */
+            --primary: #1e3a8a;
             --primary-dark: #1e293b;
-            --secondary: #facc15; /* Gold Accent */
+            --secondary: #facc15;
             --secondary-dark: #ca8a04;
             --background: #f8fafc;
             --card-bg: rgba(255, 255, 255, 0.95);
@@ -23,6 +23,7 @@
             --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.15);
             --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.2);
             --ring: 0 0 0 3px rgba(30, 58, 138, 0.2);
+            --gray-200: #e5e7eb;
         }
 
         * {
@@ -96,58 +97,6 @@
             margin-bottom: 16px;
         }
 
-        .info-card {
-            background: rgba(30, 58, 138, 0.05);
-            border: 1px solid rgba(30, 58, 138, 0.1);
-            padding: 24px;
-            border-radius: 12px;
-            margin-bottom: 32px;
-        }
-
-        .info-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: var(--primary);
-            margin-bottom: 16px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .info-steps {
-            list-style: none;
-            color: var(--text-secondary);
-        }
-
-        .info-steps li {
-            margin: 12px 0;
-            padding-left: 28px;
-            position: relative;
-            font-size: 0.95rem;
-        }
-
-        .info-steps li::before {
-            content: counter(step-counter);
-            counter-increment: step-counter;
-            position: absolute;
-            left: 0;
-            top: 2px;
-            background: var(--primary);
-            color: white;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.8rem;
-            font-weight: 600;
-        }
-
-        .info-steps {
-            counter-reset: step-counter;
-        }
-
         .form-section {
             margin-bottom: 32px;
         }
@@ -205,7 +154,7 @@
             gap: 8px;
         }
 
-        .button:hover:not(:disabled) {
+        .button:hover {
             background: var(--primary-dark);
             transform: translateY(-2px);
             box-shadow: var(--shadow-md);
@@ -223,16 +172,12 @@
             color: var(--primary-dark);
         }
 
-        .button.secondary:hover:not(:disabled) {
+        .button.secondary:hover {
             background: var(--secondary-dark);
         }
 
         .button.success {
             background: var(--success);
-        }
-
-        .button.danger {
-            background: var(--danger);
         }
 
         .button.ghost {
@@ -241,7 +186,7 @@
             color: var(--primary);
         }
 
-        .button.ghost:hover:not(:disabled) {
+        .button.ghost:hover {
             background: var(--primary);
             color: white;
         }
@@ -427,7 +372,6 @@
 
         .status-indicator.online {
             background: var(--success);
-            box-shadow: 0 0 8px rgba(34, 197, 94, 0.3);
         }
 
         .status-indicator.offline {
@@ -514,35 +458,6 @@
             color: var(--text-secondary);
         }
 
-        .preview-iframe {
-            width: 100%;
-            height: 600px;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            border-radius: 8px;
-            margin-top: 16px;
-            background: white;
-        }
-
-        .preview-controls {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 16px;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-
-        .preview-url {
-            font-family: monospace;
-            font-size: 0.9rem;
-            color: var(--text-secondary);
-            background: rgba(0, 0, 0, 0.05);
-            padding: 8px 12px;
-            border-radius: 4px;
-            flex: 1;
-            min-width: 200px;
-        }
-
         @media (max-width: 768px) {
             body {
                 padding: 20px;
@@ -580,15 +495,6 @@
 
             .feature-grid {
                 grid-template-columns: 1fr;
-            }
-
-            .preview-controls {
-                flex-direction: column;
-                align-items: stretch;
-            }
-
-            .preview-url {
-                text-align: center;
             }
         }
 
@@ -703,7 +609,7 @@
                     <i class="fas fa-rocket"></i>
                     Clone Website
                 </button>
-                <button type="button" class="button ghost" onclick="togglePreviewSection()">
+                <button type="button" class="button ghost" onclick="showPreviewSection()">
                     <i class="fas fa-list"></i>
                     View Cloned Websites
                 </button>
@@ -737,53 +643,7 @@
     </div>
 
     <script>
-        // SocketIO with enhanced reconnection handling - fallback to polling for Render
-        const socket = io({
-            path: '/socket.io',
-            reconnection: true,
-            reconnectionAttempts: 10,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 10000,
-            randomizationFactor: 0.5,
-            transports: ['polling', 'websocket'] // Polling first for Render compatibility
-        });
-
-        socket.on('connect_error', (error) => {
-            console.error('Connection error:', error);
-            showStatus('Connection error, retrying...', 'error');
-        });
-
-        socket.on('reconnect', (attempt) => {
-            console.log(`Reconnected successfully after ${attempt} attempts`);
-            showStatus('Reconnected to server!', 'success');
-        });
-
-        socket.on('reconnect_error', (error) => {
-            console.error('Reconnection error:', error);
-            showStatus('Failed to reconnect: ' + error.message, 'error');
-        });
-
-        socket.on('reconnect_failed', () => {
-            console.error('Reconnection failed after maximum attempts');
-            showStatus('Failed to reconnect to server. Please refresh the page.', 'error');
-        });
-
-        let disconnectTimeout;
-        socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-            showStatus('Disconnected from server, attempting to reconnect...', 'info');
-            disconnectTimeout = setTimeout(() => {
-                showStatus('Server unavailable. Reloading page...', 'error');
-                setTimeout(() => location.reload(), 2000);
-            }, 30000); // 30 seconds timeout
-        });
-
-        socket.on('connect', () => {
-            console.log('Connected to server');
-            clearTimeout(disconnectTimeout);
-            showStatus('Connected to server!', 'success');
-        });
-
+        const socket = io();
         const form = document.getElementById('cloneForm');
         const urlInput = document.getElementById('url');
         const locationInput = document.getElementById('downloadLocation');
@@ -796,7 +656,6 @@
         const websitesList = document.getElementById('websitesList');
         
         let currentDownloadLocation = '';
-        let isCloning = false;
         
         // Initialize default download location
         window.addEventListener('load', () => {
@@ -804,10 +663,6 @@
             locationInput.value = defaultLocation;
             currentDownloadLocation = defaultLocation;
             console.log('Default download location set:', defaultLocation);
-            // Load cloned websites if section is visible
-            if (previewSection.style.display === 'block') {
-                loadClonedWebsites();
-            }
         });
         
         function chooseDownloadLocation() {
@@ -839,7 +694,7 @@
             }
         }
         
-        function togglePreviewSection() {
+        function showPreviewSection() {
             const isVisible = previewSection.style.display === 'block';
             previewSection.style.display = isVisible ? 'none' : 'block';
             if (!isVisible) {
@@ -891,14 +746,6 @@
                 const websiteDiv = document.createElement('div');
                 websiteDiv.className = 'website-item';
                 
-                const previewButtonText = website.has_preview ? 'View Preview' : 'Start Preview';
-                const stopButtonHtml = website.has_preview ? `
-                    <button class="button danger small-button" onclick="stopPreview('${website.domain}')">
-                        <i class="fas fa-stop"></i>
-                        Stop
-                    </button>
-                ` : '';
-                
                 websiteDiv.innerHTML = `
                     <div class="website-info">
                         <div class="website-domain">
@@ -913,9 +760,8 @@
                     <div class="website-actions">
                         <button class="button success small-button" onclick="previewWebsite('${website.domain}')">
                             <i class="fas fa-eye"></i>
-                            ${previewButtonText}
+                            Preview
                         </button>
-                        ${stopButtonHtml}
                     </div>
                 `;
                 
@@ -924,12 +770,7 @@
         }
         
         function previewWebsite(domain) {
-            const button = event.target.closest('.button');
-            const originalContent = button.innerHTML;
-            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
-            button.disabled = true;
-            
-            showStatus(`Starting preview for ${domain}...`, 'info');
+            showStatus(`Starting preview server for ${domain}...`, 'info');
             console.log(`Attempting to preview website: ${domain}`);
             
             fetch(`/api/preview/${domain}`)
@@ -943,32 +784,29 @@
                     console.log('Preview response:', data);
                     if (data.success) {
                         const previewUrl = data.preview_url;
-                        console.log(`Opening preview URL: ${previewUrl}`);
+                        let retryCount = 0;
+                        const maxRetries = 3;
                         
-                        // Try to open in new window
-                        const newWindow = window.open(previewUrl, '_blank', 'width=1200,height=800');
-                        if (newWindow) {
-                            showStatus(`Preview opened for ${domain} at ${previewUrl}`, 'success');
-                        } else {
-                            // Fallback: show URL to user
-                            showStatus(`Preview ready! Open manually: ${previewUrl}`, 'success');
-                            
-                            // Create a clickable link in the status
-                            setTimeout(() => {
-                                const statusEl = document.getElementById('status');
-                                statusEl.innerHTML = `
-                                    Preview ready for ${domain}!<br>
-                                    <a href="${previewUrl}" target="_blank" style="color: var(--primary); text-decoration: underline; font-weight: 600;">
-                                        Click here to open: ${previewUrl}
-                                    </a>
-                                `;
-                            }, 500);
+                        function tryOpenPreview() {
+                            console.log(`Opening preview URL: ${previewUrl} (Attempt ${retryCount + 1})`);
+                            const newWindow = window.open(previewUrl, '_blank');
+                            if (!newWindow) {
+                                console.warn('Popup blocked or failed to open');
+                                if (retryCount < maxRetries) {
+                                    retryCount++;
+                                    setTimeout(tryOpenPreview, 1000);
+                                } else {
+                                    showStatus('Error: Could not open preview. Please allow popups or open the URL manually: ' + previewUrl, 'error');
+                                }
+                            } else {
+                                showStatus(`Preview started for ${domain} at ${previewUrl}`, 'success');
+                                setTimeout(() => {
+                                    loadClonedWebsites();
+                                }, 1000);
+                            }
                         }
                         
-                        // Refresh websites list
-                        setTimeout(() => {
-                            loadClonedWebsites();
-                        }, 1000);
+                        tryOpenPreview();
                     } else {
                         showStatus('Error starting preview: ' + data.error, 'error');
                         console.error('Preview error:', data.error);
@@ -977,40 +815,6 @@
                 .catch(error => {
                     showStatus('Error: ' + error.message, 'error');
                     console.error('Error in previewWebsite:', error);
-                })
-                .finally(() => {
-                    button.innerHTML = originalContent;
-                    button.disabled = false;
-                });
-        }
-        
-        function stopPreview(domain) {
-            const button = event.target.closest('.button');
-            const originalContent = button.innerHTML;
-            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Stopping...';
-            button.disabled = true;
-            
-            showStatus(`Stopping preview server for ${domain}...`, 'info');
-            
-            fetch(`/api/stop_preview/${domain}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showStatus(`Preview stopped for ${domain}`, 'success');
-                        setTimeout(() => {
-                            loadClonedWebsites();
-                        }, 1000);
-                    } else {
-                        showStatus('Error stopping preview: ' + data.error, 'error');
-                    }
-                })
-                .catch(error => {
-                    showStatus('Error: ' + error.message, 'error');
-                    console.error('Error in stopPreview:', error);
-                })
-                .finally(() => {
-                    button.innerHTML = originalContent;
-                    button.disabled = false;
                 });
         }
         
@@ -1019,7 +823,6 @@
             status.className = `status ${type}`;
             status.style.display = 'block';
             
-            // Auto hide after 5 seconds for non-error messages
             if (type !== 'error') {
                 setTimeout(() => {
                     status.style.display = 'none';
@@ -1029,41 +832,20 @@
         
         function resetForm() {
             try {
-                console.log('=== RESET FORM DEBUG ===');
-                console.log('Before reset - isCloning:', isCloning);
-                console.log('Before reset - button disabled:', cloneBtn.disabled);
-                console.log('Before reset - button innerHTML:', cloneBtn.innerHTML);
-                
-                isCloning = false;
+                console.log('Resetting form');
                 cloneBtn.disabled = false;
                 cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
                 progressFill.style.width = '0%';
                 progressContainer.style.display = 'none';
                 progressText.textContent = 'Initializing...';
-                
-                console.log('After reset - isCloning:', isCloning);
-                console.log('After reset - button disabled:', cloneBtn.disabled);
-                console.log('After reset - button innerHTML:', cloneBtn.innerHTML);
-                console.log('=== RESET FORM COMPLETE ===');
             } catch (error) {
                 console.error('Error in resetForm:', error);
-                // Force reset even if there's an error
-                isCloning = false;
-                if (cloneBtn) {
-                    cloneBtn.disabled = false;
-                    cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
-                }
                 showStatus('Error resetting form: ' + error.message, 'error');
             }
         }
         
         form.addEventListener('submit', (e) => {
             e.preventDefault();
-            
-            if (isCloning) {
-                console.log('Cloning already in progress, ignoring submission');
-                return;
-            }
             
             const url = urlInput.value.trim();
             const downloadLocation = currentDownloadLocation;
@@ -1080,10 +862,6 @@
                 return;
             }
             
-            // Set cloning state
-            isCloning = true;
-            
-            // Reset UI
             cloneBtn.disabled = true;
             cloneBtn.innerHTML = '<span class="loading-spinner"></span> Cloning...';
             progressContainer.style.display = 'block';
@@ -1093,7 +871,6 @@
             
             console.log('Starting clone process for URL:', url, 'Location:', downloadLocation);
             
-            // Start cloning
             socket.emit('clone_website', { 
                 url: url, 
                 downloadLocation: downloadLocation 
@@ -1102,24 +879,13 @@
         
         socket.on('status_update', (data) => {
             showStatus(data.message, 'info');
-            if (data.progress !== undefined) {
-                progressFill.style.width = data.progress + '%';
-                progressText.textContent = `${data.message} (${data.progress}%)`;
-            }
             console.log('Status update:', data);
         });
         
         socket.on('clone_complete', (data) => {
             console.log('Clone complete:', data);
-            
-            // Immediately reset the button state
-            isCloning = false;
-            cloneBtn.disabled = false;
-            cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
-            
             showStatus(`Website cloned successfully!`, 'success');
             progressText.textContent = 'Completed successfully!';
-            progressFill.style.width = '100%';
             
             const actionsHtml = `
                 <div class="download-actions">
@@ -1131,7 +897,7 @@
                         <i class="fas fa-eye"></i>
                         Preview Website
                     </button>
-                    <button class="button ghost" onclick="togglePreviewSection()">
+                    <button class="button ghost" onclick="showPreviewSection()">
                         <i class="fas fa-list"></i>
                         Show All Websites
                     </button>
@@ -1139,75 +905,51 @@
             `;
             
             status.innerHTML += actionsHtml;
+            resetForm();
             
-            // Hide progress after a delay
-            setTimeout(() => {
-                progressContainer.style.display = 'none';
-                progressFill.style.width = '0%';
-                progressText.textContent = 'Initializing...';
-            }, 3000);
-            
-            // Auto-refresh websites list if it's visible
             if (previewSection.style.display === 'block') {
                 setTimeout(() => {
                     loadClonedWebsites();
-                }, 1500);
+                }, 1000);
             }
+            
+            setTimeout(() => {
+                if (cloneBtn.disabled) {
+                    console.warn('Forcing form reset due to timeout');
+                    resetForm();
+                }
+            }, 2000);
         });
         
         socket.on('clone_error', (data) => {
             console.error('Clone error:', data);
-            
-            // Immediately reset the button state
-            isCloning = false;
-            cloneBtn.disabled = false;
-            cloneBtn.innerHTML = '<i class="fas fa-rocket"></i> Clone Website';
-            
             showStatus(`Error: ${data.error}`, 'error');
             progressText.textContent = 'Error occurred';
-            
-            // Hide progress after a delay
-            setTimeout(() => {
-                progressContainer.style.display = 'none';
-                progressFill.style.width = '0%';
-                progressText.textContent = 'Initializing...';
-            }, 3000);
+            resetForm();
+        });
+        
+        window.addEventListener('load', () => {
+            if (previewSection.style.display === 'block') {
+                loadClonedWebsites();
+            }
         });
 
-        // Add URL validation
         urlInput.addEventListener('input', function() {
             const url = this.value.trim();
             if (url && !url.match(/^https?:\/\//)) {
                 this.style.borderColor = 'var(--warning)';
             } else {
-                this.style.borderColor = '';
+                this.style.borderColor = 'var(--gray-200)';
             }
         });
 
-        // Add keyboard shortcuts
         document.addEventListener('keydown', function(e) {
-            // Ctrl/Cmd + Enter to submit form
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                if (!cloneBtn.disabled && !isCloning) {
+                if (!cloneBtn.disabled) {
                     form.dispatchEvent(new Event('submit'));
                 }
             }
         });
-        
-        // Force reset button state on page visibility change
-        document.addEventListener('visibilitychange', function() {
-            if (document.visibilityState === 'visible' && !isCloning) {
-                resetForm();
-            }
-        });
-        
-        // Backup reset mechanism
-        setInterval(() => {
-            if (!isCloning && cloneBtn.disabled) {
-                console.warn('Detected stuck button state, forcing reset');
-                resetForm();
-            }
-        }, 5000);
     </script>
 </body>
 </html>
