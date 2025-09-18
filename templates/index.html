@@ -638,6 +638,18 @@
                     required
                 >
             </div>
+            <div class="input-group">
+                <label class="label" for="cloneName">
+                    <i class="fas fa-tag"></i>
+                    Clone Name (Optional - for custom ZIP/folder name)
+                </label>
+                <input 
+                    type="text" 
+                    id="cloneName" 
+                    class="input" 
+                    placeholder="MyClone_2025"
+                >
+            </div>
 
             <div class="button-group">
                 <button type="submit" class="button" id="cloneBtn">
@@ -681,6 +693,7 @@
         const socket = io();
         const form = document.getElementById('cloneForm');
         const urlInput = document.getElementById('url');
+        const cloneNameInput = document.getElementById('cloneName');
         const cloneBtn = document.getElementById('cloneBtn');
         const progressContainer = document.getElementById('progressContainer');
         const progressFill = document.getElementById('progressFill');
@@ -810,6 +823,7 @@
             e.preventDefault();
             
             let url = urlInput.value.trim();
+            let cloneName = cloneNameInput.value.trim();
             if (!url) {
                 showStatus('Please enter a website URL', 'error');
                 return;
@@ -827,7 +841,11 @@
             progressFill.style.width = '0%';
             progressText.textContent = 'Initializing...';
             
-            socket.emit('clone_website', { url: url });
+            const payload = { url: url };
+            if (cloneName) {
+                payload.clone_name = cloneName;
+            }
+            socket.emit('clone_website', payload);
         });
         
         socket.on('status_update', (data) => {
@@ -844,7 +862,7 @@
             
             const actionsHtml = `
                 <div class="download-actions">
-                    <a href="${data.download_url}" class="download-link">
+                    <a href="${data.download_url}" class="download-link" download>
                         <i class="fas fa-download"></i>
                         Download ZIP Archive
                     </a>

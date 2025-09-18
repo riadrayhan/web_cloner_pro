@@ -15,6 +15,8 @@ import tempfile
 import uuid
 from datetime import datetime
 from werkzeug.exceptions import abort
+from functools import wraps
+import random
 
 # Get port from environment variable (required for Render)
 port = int(os.environ.get('PORT', 5000))
@@ -29,12 +31,25 @@ socketio = SocketIO(app,
                     logger=False,
                     engineio_logger=False)
 
-# Use temp directory on Render, else current dir
-if 'RENDER' in os.environ:
-    base_output_dir = tempfile.gettempdir()
-else:
-    base_output_dir = os.path.join(os.getcwd(), 'cloned_websites')
+# Use a persistent directory in the app root for both local and Render
+base_output_dir = os.path.join(os.getcwd(), 'clones')
 os.makedirs(base_output_dir, exist_ok=True)
+
+def retry(max_retries=3, delay=1):
+    """Retry decorator for download functions"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        raise e
+                    time.sleep(delay * (2 ** attempt) + random.uniform(0, 1))  # Exponential backoff
+            return None
+        return wrapper
+    return decorator
 
 class WebClonerCore:
     """Core web cloning functionality"""
@@ -44,9 +59,16 @@ class WebClonerCore:
         self.sid = sid
         self.namespace = namespace
         self.downloaded_resources = set()
+        self.visited_pages = set()
+        self.max_pages = 10  # Limit internal pages to prevent overload
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
         })
     
     def emit_status(self, message, progress=None):
@@ -58,7 +80,7 @@ class WebClonerCore:
             self.socketio.emit('status_update', data, room=self.sid, namespace=self.namespace)
         print(f"Status: {message} ({progress}%)" if progress else f"Status: {message}")
     
-    def clone_website(self, url, output_base_dir):
+    def clone_website(self, url, output_base_dir, clone_name=None):
         """Main cloning function"""
         try:
             self.emit_status("Starting website cloning...", 0)
@@ -66,7 +88,7 @@ class WebClonerCore:
             parsed_url = urlparse(url)
             domain = parsed_url.netloc.replace(':', '_')
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            unique_dir = f"{domain}_{timestamp}"
+            unique_dir = clone_name or f"{domain}_{timestamp}"
             output_dir = os.path.join(output_base_dir, unique_dir)
             
             os.makedirs(output_dir, exist_ok=True)
@@ -74,8 +96,11 @@ class WebClonerCore:
             os.makedirs(assets_dir, exist_ok=True)
             
             self.emit_status(f"Downloading main page from {url}...", 10)
-            response = self.session.get(url, timeout=30)
+            response = self._get_with_retry(url, timeout=60)
+            if not response:
+                raise Exception("Failed to download main page after retries")
             response.raise_for_status()
+            self.visited_pages.add(url)
             
             self.emit_status("Parsing HTML content...", 20)
             soup = BeautifulSoup(response.content, 'html.parser')
@@ -119,6 +144,14 @@ class WebClonerCore:
                 'success': False,
                 'error': str(e)
             }
+    
+    def _get_with_retry(self, url, timeout=30):
+        """Get with retry"""
+        @retry(max_retries=3, delay=2)
+        def get_request():
+            self.session.headers['Referer'] = urlparse(url).scheme + '://' + urlparse(url).netloc
+            return self.session.get(url, timeout=timeout)
+        return get_request()
     
     def create_zip_archive(self, source_dir, unique_name):
         """Create ZIP archive of cloned website"""
@@ -228,41 +261,51 @@ class WebClonerCore:
                         link['href'] = local_path
     
     def process_internal_links(self, soup, base_url, output_dir):
-        """Process internal page links"""
+        """Process internal page links with limits"""
         base_domain = urlparse(base_url).netloc
+        internal_links = []
         
         for link in soup.find_all('a', href=True):
             href = link['href']
             full_url = urljoin(base_url, href)
             link_domain = urlparse(full_url).netloc
             
-            if link_domain == base_domain:
-                try:
-                    response = self.session.get(full_url, timeout=15)
-                    if response.status_code == 200:
-                        path = urlparse(full_url).path
-                        if path.endswith('/') or not path:
-                            filename = 'index.html'
-                            local_dir = os.path.join(output_dir, path.strip('/'))
-                        else:
-                            filename = os.path.basename(path)
-                            if not filename.endswith('.html'):
-                                filename += '.html'
-                            local_dir = os.path.join(output_dir, os.path.dirname(path).strip('/'))
-                        
-                        if local_dir != output_dir:
-                            os.makedirs(local_dir, exist_ok=True)
-                        
-                        file_path = os.path.join(local_dir, filename)
-                        with open(file_path, 'w', encoding='utf-8') as f:
-                            f.write(response.text)
-                        
-                        rel_path = os.path.relpath(file_path, output_dir).replace('\\', '/')
-                        link['href'] = rel_path
-                        
-                except Exception as e:
-                    print(f"Error downloading internal page {full_url}: {e}")
+            if link_domain == base_domain and full_url not in self.visited_pages:
+                internal_links.append(full_url)
+        
+        # Limit to max_pages
+        for full_url in internal_links[:self.max_pages - len(self.visited_pages)]:
+            try:
+                self.emit_status(f"Downloading internal page: {full_url}", None)
+                response = self._get_with_retry(full_url, timeout=45)
+                if response and response.status_code == 200:
+                    self.visited_pages.add(full_url)
+                    path = urlparse(full_url).path
+                    if path.endswith('/') or not path:
+                        filename = 'index.html'
+                        local_dir = os.path.join(output_dir, path.strip('/'))
+                    else:
+                        filename = os.path.basename(path)
+                        if not filename.endswith('.html'):
+                            filename += '.html'
+                        local_dir = os.path.join(output_dir, os.path.dirname(path).strip('/'))
+                    
+                    if local_dir != output_dir:
+                        os.makedirs(local_dir, exist_ok=True)
+                    
+                    file_path = os.path.join(local_dir, filename)
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(response.text)
+                    
+                    rel_path = os.path.relpath(file_path, output_dir).replace('\\', '/')
+                    # Update link href to relative path (this is approximate, as it's for main page links)
+                    link['href'] = rel_path
+                else:
+                    print(f"Failed to download internal page {full_url}")
+            except Exception as e:
+                print(f"Error downloading internal page {full_url}: {e}")
     
+    @retry(max_retries=3, delay=1)
     def download_resource(self, url, base_url, assets_dir):
         """Download a resource and return local path"""
         try:
@@ -274,7 +317,9 @@ class WebClonerCore:
             if full_url in self.downloaded_resources:
                 return self.get_local_path(full_url, assets_dir)
             
-            response = self.session.get(full_url, timeout=15)
+            response = self._get_with_retry(full_url, timeout=30)
+            if not response:
+                raise Exception("Download failed after retries")
             response.raise_for_status()
             
             parsed_url = urlparse(full_url)
@@ -516,6 +561,7 @@ def handle_clone_request(data):
     
     def clone_task():
         url = data.get('url')
+        clone_name = data.get('clone_name', None)  # User-provided clone name
         if not url:
             socketio.emit('clone_error', {'error': 'No URL provided'}, room=sid, namespace=namespace)
             return
@@ -524,7 +570,7 @@ def handle_clone_request(data):
             url = 'https://' + url
         
         cloner = WebClonerCore(socketio, sid, namespace)
-        result = cloner.clone_website(url, base_output_dir)
+        result = cloner.clone_website(url, base_output_dir, clone_name)
         
         if result['success']:
             zip_filename = os.path.basename(result['zip_path'])
@@ -1186,6 +1232,18 @@ def create_templates():
                     required
                 >
             </div>
+            <div class="input-group">
+                <label class="label" for="cloneName">
+                    <i class="fas fa-tag"></i>
+                    Clone Name (Optional - for custom ZIP/folder name)
+                </label>
+                <input 
+                    type="text" 
+                    id="cloneName" 
+                    class="input" 
+                    placeholder="MyClone_2025"
+                >
+            </div>
 
             <div class="button-group">
                 <button type="submit" class="button" id="cloneBtn">
@@ -1229,6 +1287,7 @@ def create_templates():
         const socket = io();
         const form = document.getElementById('cloneForm');
         const urlInput = document.getElementById('url');
+        const cloneNameInput = document.getElementById('cloneName');
         const cloneBtn = document.getElementById('cloneBtn');
         const progressContainer = document.getElementById('progressContainer');
         const progressFill = document.getElementById('progressFill');
@@ -1358,6 +1417,7 @@ def create_templates():
             e.preventDefault();
             
             let url = urlInput.value.trim();
+            let cloneName = cloneNameInput.value.trim();
             if (!url) {
                 showStatus('Please enter a website URL', 'error');
                 return;
@@ -1375,7 +1435,11 @@ def create_templates():
             progressFill.style.width = '0%';
             progressText.textContent = 'Initializing...';
             
-            socket.emit('clone_website', { url: url });
+            const payload = { url: url };
+            if (cloneName) {
+                payload.clone_name = cloneName;
+            }
+            socket.emit('clone_website', payload);
         });
         
         socket.on('status_update', (data) => {
@@ -1392,7 +1456,7 @@ def create_templates():
             
             const actionsHtml = `
                 <div class="download-actions">
-                    <a href="${data.download_url}" class="download-link">
+                    <a href="${data.download_url}" class="download-link" download>
                         <i class="fas fa-download"></i>
                         Download ZIP Archive
                     </a>
@@ -1463,6 +1527,8 @@ if __name__ == '__main__':
     print("   • Manage multiple cloned sites")
     print("   • Real-time progress tracking")
     print("   • Responsive design for all devices")
+    print("   • Custom clone names for ZIP/folder")
+    print("   • Improved reliability with retries and timeouts")
     print()
     print("📱 Web Interface: http://localhost:" + str(port))
     print("📁 Download Location:", base_output_dir)
@@ -1470,4 +1536,4 @@ if __name__ == '__main__':
     print("🔧 Keep this terminal open to run the server")
     print("=" * 60)
     
-    socketio.run(app, host='localhost', port=port, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
